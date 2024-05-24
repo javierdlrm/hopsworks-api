@@ -12,6 +12,8 @@ from hsml import connection as hsml_conn
 
 # tf.keras.backend.set_floatx('float64') # didnt solve the error
 
+# To be refactored
+
 class DecisionEngine():
     def __init__(self, name, config_file_path, use_case, job_name=None, id=None, *args, **kwargs):
         self._id = id
