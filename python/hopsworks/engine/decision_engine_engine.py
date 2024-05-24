@@ -44,13 +44,14 @@ class DecisionEngineEngine(ABC):
         return self.get_resource_path(filename=filename, de="common")
 
     def get_resource_path(self, filename, de=""):
+        filename_segments = filename if isinstance(filename, list) else [filename]
         return os.path.join(
             "/Projects",
             self._client._project_name,
             "Resources",
             "decision-engine",
             de if isinstance(de, str) else de._name,
-            filename if not isinstance(filename, list) else *filename,
+            *filename_segments,
         )
 
     def backup_common_resource_file(self, filename, de):
@@ -87,7 +88,9 @@ class RecommendationDecisionEngineEngine(DecisionEngineEngine):
     def create_jobs(self, de):
         """Create the jobs that compose the Recommendation Decision Engine."""
         # create ingestion pipeline job (items)
-        fp_filepath = self.backup_common_resource_file(filename="feature_pipeline.py", de=de)
+        fp_filepath = self.backup_common_resource_file(
+            filename="feature_pipeline.py", de=de
+        )
         spark_config = self._jobs_api.get_configuration("PYSPARK")
         spark_config["appPath"] = fp_filepath
         spark_config["defaultArgs"] = f"-name {de._name}"
@@ -111,7 +114,9 @@ class RecommendationDecisionEngineEngine(DecisionEngineEngine):
         )  # TODO: should run continuously instead
 
         # create training pipeline
-        tp_filepath = self.backup_common_resource_file(filename="training_pipeline.py", de=de)
+        tp_filepath = self.backup_common_resource_file(
+            filename="training_pipeline.py", de=de
+        )
         py_config = self._jobs_api.get_configuration("PYTHON")
         py_config["appPath"] = tp_filepath
         py_config["defaultArgs"] = f"-name {de._name}"
