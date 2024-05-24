@@ -16,7 +16,7 @@ class DecisionEngineEngine(ABC):
 
     def __init__(self):
         client.init("hopsworks")
-        self.__client = client.get_instance()
+        self._client = client.get_instance()
 
         self._dataset_api = dataset_api.DatasetApi(self._client._project_id)
         self._env_api = environment_api.EnvironmentApi(
