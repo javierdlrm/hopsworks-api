@@ -34,14 +34,14 @@ class DecisionEngineEngine(ABC):
         self._mr = hsml_conn().get_model_registry()
 
     def setup_decision_engine(self, de):
-        logging.info("[DecisionEngine] setting up new decision engine")
-        logging.info("[DecisionEngine] installing requirements...")
+        logging.info("[DecisionEngine] Setting up new decision engine")
+        logging.info("[DecisionEngine] Installing requirements...")
         self.install_requirements(de)
-        logging.info("[DecisionEngine] creating jobs...")
+        logging.info("[DecisionEngine] Creating jobs...")
         fp_job, sfp_job, tp_job = self.create_jobs(de)
-        logging.info("[DecisionEngine] starting jobs...")
+        logging.info("[DecisionEngine] Starting jobs...")
         self.start_jobs(de, fp_job, sfp_job, tp_job)
-        logging.info("[DecisionEngine] creating deployments...")
+        logging.info("[DecisionEngine] Creating deployments...")
         self.create_deployments(de)
 
     def get_common_resource_path(self, filename):
@@ -61,7 +61,7 @@ class DecisionEngineEngine(ABC):
     def backup_common_resource_file(self, filename, de):
         original_filepath = self.get_common_resource_path(filename=filename)
         dest_filepath = self.get_resource_path(filename=filename, de=de)
-        dataset_api.copy(original_filepath, dest_filepath, overwrite=True)
+        self._dataset_api.copy(original_filepath, dest_filepath, overwrite=True)
         return dest_filepath
 
     @abstractmethod
