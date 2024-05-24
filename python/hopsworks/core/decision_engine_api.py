@@ -2,6 +2,7 @@ from hopsworks import decision_engine, client
 
 
 class DecisionEngineApi:
+
     def __init__(
         self,
         project_id,

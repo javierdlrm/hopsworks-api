@@ -47,7 +47,7 @@ class DecisionEngineEngine(ABC):
             "Resources",
             "decision-engine",
             "" if de is None else de._name,
-            filename,
+            filename if not isinstance(filename, list) else *filename,
         )
 
     def copy_resource_file(self, filename, de):
@@ -138,7 +138,7 @@ class RecommendationDecisionEngineEngine(DecisionEngineEngine):
         # create deployment for query model
         mr_query_model = self._mr.get_model(name=de._prefix + "query_model", version=1)
         transformer_script_path = self.copy_resource_file(
-            filename="query_model_transformer.py", de=de
+            filename=["inference_pipeline", "query_model_transformer.py"], de=de
         )
         query_transformer = Transformer(
             script_file=transformer_script_path, resources={"num_instances": 1}
@@ -156,7 +156,7 @@ class RecommendationDecisionEngineEngine(DecisionEngineEngine):
             description="Model for redirecting events into Kafka",
         )
         redirector_script_path = self.get_resource_path(
-            filename="events_redirect_predictor.py"
+            filename=["inference_pipeline", "events_redirect_predictor.py"]
         )
         redirect_model.save(redirector_script_path, keep_original_files=True)
         redirector_script_path = os.path.join(
