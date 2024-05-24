@@ -1,7 +1,7 @@
 from typing import List, Dict
 import tensorflow as tf
 
-import tensorflow_recommenders as tfrs
+# import tensorflow_recommenders as tfrs
     
 BATCH_SIZE = 2048
 

@@ -1,5 +1,6 @@
 from hopsworks import decision_engine, client
 
+
 class DecisionEngineApi:
     def __init__(
         self,
@@ -8,7 +9,7 @@ class DecisionEngineApi:
     ):
         self._project_id = project_id
         self._project_name = project_name
-        
+
     def get_all(self):
         """
         Get all decision engines in the project.
@@ -27,7 +28,7 @@ class DecisionEngineApi:
         """
         _client = client.get_instance()
 
-        path_params = ["project", self._project_id, "decisionengine", 'name', name]
+        path_params = ["project", self._project_id, "decisionengine", "name", name]
 
         return decision_engine.DecisionEngine.from_response_json(
             _client._send_request("GET", path_params),
@@ -45,7 +46,6 @@ class DecisionEngineApi:
             _client._send_request("GET", path_params),
         )
 
-        
     def create(self, de):
         """
         Create decision engine from DecisionEngine object.
@@ -57,8 +57,8 @@ class DecisionEngineApi:
 
         return decision_engine.DecisionEngine.from_response_json(
             _client._send_request("POST", path_params, headers=headers, data=dct)
-        )        
-        
+        )
+
     def update(self, de):
         """
         Update decision engine from DecisionEngine object.
@@ -71,7 +71,7 @@ class DecisionEngineApi:
         return decision_engine.DecisionEngine.from_response_json(
             _client._send_request("PUT", path_params, headers=headers, data=dct),
         )
-    
+
     def delete(self, de):
         """
         Delete decision engine by id.
