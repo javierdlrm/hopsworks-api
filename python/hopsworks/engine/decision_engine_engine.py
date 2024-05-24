@@ -77,14 +77,14 @@ class RecommendationDecisionEngineEngine(DecisionEngineEngine):
 
     def install_requirements(self, de):
         """Install dependencies required for the Recommendation Decision Engine."""
-        dependencies_file_path = self.get_resource_path("requirements.txt")
+        dependencies_file_path = self.get_resource_path(["common", "requirements.txt"])
         env = self._env_api.get_environment()
         env.install_requirements(dependencies_file_path, await_installation=True)
 
     def create_jobs(self, de):
         """Create the jobs that compose the Recommendation Decision Engine."""
         # create ingestion pipeline job (items)
-        fp_filepath = self.copy_resource_file(filename="feature_pipeline.py", de=de)
+        fp_filepath = self.copy_resource_file(filename=["common", "feature_pipeline.py"], de=de)
         spark_config = self._jobs_api.get_configuration("PYSPARK")
         spark_config["appPath"] = fp_filepath
         spark_config["defaultArgs"] = f"-name {de._name}"
@@ -94,7 +94,7 @@ class RecommendationDecisionEngineEngine(DecisionEngineEngine):
 
         # create streaming feature pipeline job (events)
         sfp_filepath = self.copy_resource_file(
-            filename="streaming_feature_pipeline.py", de=de
+            filename=["commont", "streaming_feature_pipeline.py"], de=de
         )
         spark_config = self._jobs_api.get_configuration("PYSPARK")
         spark_config["appPath"] = sfp_filepath
@@ -108,7 +108,7 @@ class RecommendationDecisionEngineEngine(DecisionEngineEngine):
         )  # TODO: should run continuously instead
 
         # create training pipeline
-        tp_filepath = self.copy_resource_file(filename="training_pipeline.py", de=de)
+        tp_filepath = self.copy_resource_file(filename=["common", "training_pipeline.py"], de=de)
         py_config = self._jobs_api.get_configuration("PYTHON")
         py_config["appPath"] = tp_filepath
         py_config["defaultArgs"] = f"-name {de._name}"
@@ -138,7 +138,7 @@ class RecommendationDecisionEngineEngine(DecisionEngineEngine):
         # create deployment for query model
         mr_query_model = self._mr.get_model(name=de._prefix + "query_model", version=1)
         transformer_script_path = self.copy_resource_file(
-            filename=["inference_pipeline", "query_model_transformer.py"], de=de
+            filename=["common", "inference_pipeline", "query_model_transformer.py"], de=de
         )
         query_transformer = Transformer(
             script_file=transformer_script_path, resources={"num_instances": 1}
@@ -156,7 +156,7 @@ class RecommendationDecisionEngineEngine(DecisionEngineEngine):
             description="Model for redirecting events into Kafka",
         )
         redirector_script_path = self.get_resource_path(
-            filename=["inference_pipeline", "events_redirect_predictor.py"]
+            filename=["common", "inference_pipeline", "events_redirect_predictor.py"]
         )
         redirect_model.save(redirector_script_path, keep_original_files=True)
         redirector_script_path = os.path.join(
