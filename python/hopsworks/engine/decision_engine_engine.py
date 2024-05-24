@@ -3,6 +3,7 @@ from abc import ABC, abstractmethod
 import os
 import logging
 
+from hopsworks import client
 from hopsworks.core import job_api, environment_api, dataset_api, kafka_api
 
 from hsml.transformer import Transformer
@@ -14,6 +15,9 @@ from hsml import connection as hsml_conn
 class DecisionEngineEngine(ABC):
 
     def __init__(self):
+        client.init("hopsworks")
+        self.__client = client.get_instance()
+
         self._dataset_api = dataset_api.DatasetApi(self._client._project_id)
         self._env_api = environment_api.EnvironmentApi(
             self._client._project_id, self._client._project_name

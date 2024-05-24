@@ -24,13 +24,13 @@ class DecisionEngine:
         self._redirect_model = None
 
         client.init("hopsworks")
-        self._client = client.get_instance()
-        self._dataset_api = dataset_api.DatasetApi(self._client._project_id)
+        _client = client.get_instance()
+        self._dataset_api = dataset_api.DatasetApi(_client._project_id)
         self._configs_dict = self.load_configs(self._config_file_path)
 
         self._kafka_schema_name = self._prefix + "events" + "_1"
         self._kafka_topic_name = "_".join(
-            [self._client._project_name, self._configs_dict["name"], "events"]
+            [_client._project_name, self._configs_dict["name"], "events"]
         )
 
         if self._configs_dict["use_case"] == "recommendation":
