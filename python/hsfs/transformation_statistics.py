@@ -41,7 +41,7 @@ class FeatureTransformationStatistics:
     max: Optional[float] = None
     sum: Optional[float] = None
     mean: Optional[float] = None
-    stddev: Optional[float] = None
+    std_dev: Optional[float] = None
     percentiles: Optional[Mapping[str, float]] = None
     # with exact uniqueness
     distinctness: Optional[float] = None
@@ -62,7 +62,7 @@ class FeatureTransformationStatistics:
         max: Optional[float] = None,
         sum: Optional[float] = None,
         mean: Optional[float] = None,
-        stddev: Optional[float] = None,
+        std_dev: Optional[float] = None,
         percentiles: Optional[Mapping[str, float]] = None,
         distinctness: Optional[float] = None,
         entropy: Optional[float] = None,
@@ -81,7 +81,7 @@ class FeatureTransformationStatistics:
         self._max = max
         self._sum = sum
         self._mean = mean
-        self._stddev = stddev
+        self._std_dev = std_dev
         self._percentiles = percentiles
         self._distinctness = distinctness
         self._entropy = entropy
@@ -149,9 +149,9 @@ class FeatureTransformationStatistics:
         return self._mean
 
     @property
-    def stddev(self) -> Optional[float]:
+    def std_dev(self) -> Optional[float]:
         """Standard deviation of the feature values."""
-        return self._stddev
+        return self._std_dev
 
     @property
     def percentiles(self) -> Optional[Mapping[str, float]]:
