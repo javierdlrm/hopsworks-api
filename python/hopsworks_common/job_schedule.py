@@ -74,6 +74,12 @@ class JobSchedule:
     def json(self):
         return json.dumps(self, cls=util.Encoder)
 
+    def __str__(self) -> str:
+        return self.json()
+
+    def __repr__(self) -> str:
+        return f"JobSchedule({self._cron_expression!r}, enabled: {self._enabled!r})"
+
     @property
     def id(self):
         """Return the schedule id"""

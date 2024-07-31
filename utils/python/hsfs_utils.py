@@ -236,13 +236,10 @@ def run_feature_monitoring(job_conf: Dict[str, str]) -> None:
             config_name=job_conf["config_name"],
         )
     except Exception as e:
-        config = monitoring_config_engine.get_feature_monitoring_configs(
-            name=job_conf["config_name"]
-        )
-        monitoring_config_engine._result_engine.save_feature_monitoring_result_with_exception(
-            config_id=config.id,
-            job_name=config.job_name,
-            feature_name=config.feature_name,
+        fm_config = monitoring_config_engine.get(name=job_conf["config_name"])
+        monitoring_config_engine._result_engine.save_with_exception(
+            feature_monitoring_config_id=fm_config.id,
+            job_name=fm_config.job_name,
         )
         raise e
 
@@ -276,7 +273,7 @@ if __name__ == "__main__":
             "compute_stats",
             "ge_validate",
             "import_fg",
-            "run_feature_monitoring",
+            "run_fm",
             "delta_vacuum_fg",
         ],
         help="Operation type",
@@ -314,7 +311,7 @@ if __name__ == "__main__":
             ge_validate(job_conf)
         elif args.op == "import_fg":
             import_fg(job_conf)
-        elif args.op == "run_feature_monitoring":
+        elif args.op == "run_fm":
             run_feature_monitoring(job_conf)
         elif args.op == "delta_vacuum_fg":
             delta_vacuum_fg(spark, job_conf)

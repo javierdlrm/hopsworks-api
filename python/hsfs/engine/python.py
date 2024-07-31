@@ -147,9 +147,9 @@ class Engine:
                 sql_query,
                 dataframe_type,
                 schema,
-                arrow_flight_config=read_options.get("arrow_flight_config", {})
-                if read_options
-                else {},
+                arrow_flight_config=(
+                    read_options.get("arrow_flight_config", {}) if read_options else {}
+                ),
             )
         else:
             return self._jdbc(
