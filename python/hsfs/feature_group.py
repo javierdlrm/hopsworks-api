@@ -1516,7 +1516,7 @@ class FeatureGroupBase:
                 "Only Feature Group registered with Hopsworks can fetch feature monitoring configurations."
             )
 
-        return self._feature_monitoring_config_engine.get_feature_monitoring_configs(
+        return self._feature_monitoring_config_engine.get(
             name=name,
             feature_name=feature_name,
             config_id=config_id,
@@ -1581,7 +1581,7 @@ class FeatureGroupBase:
                 "Only Feature Group registered with Hopsworks can fetch feature monitoring history."
             )
 
-        return self._feature_monitoring_result_engine.get_feature_monitoring_results(
+        return self._feature_monitoring_result_engine.get(
             config_name=config_name,
             config_id=config_id,
             start_time=start_time,
@@ -1589,19 +1589,16 @@ class FeatureGroupBase:
             with_statistics=with_statistics,
         )
 
-    def create_statistics_monitoring(
+    def create_scheduled_statistics(
         self,
         name: str,
-        feature_name: Optional[str] = None,
+        feature_names: Optional[str, List[str]] = None,
         description: Optional[str] = None,
         start_date_time: Optional[Union[int, str, datetime, date, pd.Timestamp]] = None,
         end_date_time: Optional[Union[int, str, datetime, date, pd.Timestamp]] = None,
         cron_expression: Optional[str] = "0 0 12 ? * * *",
     ) -> fmc.FeatureMonitoringConfig:
-        """Run a job to compute statistics on snapshot of feature data on a schedule.
-
-        !!! experimental
-            Public API is subject to change, this feature is not suitable for production use-cases.
+        """Create a job to compute statistics on snapshot of feature data on a schedule.
 
         !!! example
             ```python3
@@ -1609,7 +1606,7 @@ class FeatureGroupBase:
             fg = fs.get_feature_group(name="my_feature_group", version=1)
 
             # enable statistics monitoring
-            my_config = fg.create_statistics_monitoring(
+            my_config = fg.create_scheduled_statistics(
                 name="my_config",
                 start_date_time="2021-01-01 00:00:00",
                 description="my description",
@@ -1624,7 +1621,7 @@ class FeatureGroupBase:
         # Arguments
             name: Name of the feature monitoring configuration.
                 name must be unique for all configurations attached to the feature group.
-            feature_name: Name of the feature to monitor. If not specified, statistics
+            feature_names: Names of the features to monitor. If not specified, statistics
                 will be computed for all features.
             description: Description of the feature monitoring configuration.
             start_date_time: Start date and time from which to start computing statistics.
@@ -1642,12 +1639,18 @@ class FeatureGroupBase:
         """
         if not self._id:
             raise FeatureStoreException(
-                "Only Feature Group registered with Hopsworks can enable scheduled statistics monitoring."
+                "Only Feature Group registered with Hopsworks can enable scheduled statistics."
             )
+
+        if feature_names is None:
+            # choose all features if none is selected
+            feature_names = [feat.name for feat in self._features]
+        elif not isinstance(feature_names, list):
+            feature_names = [feature_names]
 
         return self._feature_monitoring_config_engine._build_default_statistics_monitoring_config(
             name=name,
-            feature_name=feature_name,
+            feature_names=feature_names,
             description=description,
             start_date_time=start_date_time,
             valid_feature_names=[feat.name for feat in self._features],
@@ -1658,16 +1661,12 @@ class FeatureGroupBase:
     def create_feature_monitoring(
         self,
         name: str,
-        feature_name: str,
         description: Optional[str] = None,
         start_date_time: Optional[Union[int, str, datetime, date, pd.Timestamp]] = None,
         end_date_time: Optional[Union[int, str, datetime, date, pd.Timestamp]] = None,
         cron_expression: Optional[str] = "0 0 12 ? * * *",
     ) -> fmc.FeatureMonitoringConfig:
         """Enable feature monitoring to compare statistics on snapshots of feature data over time.
-
-        !!! experimental
-            Public API is subject to change, this feature is not suitable for production use-cases.
 
         !!! example
             ```python3
@@ -1677,7 +1676,6 @@ class FeatureGroupBase:
             # enable feature monitoring
             my_config = fg.create_feature_monitoring(
                 name="my_monitoring_config",
-                feature_name="my_feature",
                 description="my monitoring config description",
                 cron_expression="0 0 12 ? * * *",
             ).with_detection_window(
@@ -1689,6 +1687,7 @@ class FeatureGroupBase:
                 time_offset="1w1d",
                 window_length="1d",
             ).compare_on(
+                feature_name="my_feature",
                 metric="mean",
                 threshold=0.5,
             ).save()
@@ -1697,7 +1696,6 @@ class FeatureGroupBase:
         # Arguments
             name: Name of the feature monitoring configuration.
                 name must be unique for all configurations attached to the feature group.
-            feature_name: Name of the feature to monitor.
             description: Description of the feature monitoring configuration.
             start_date_time: Start date and time from which to start computing statistics.
             end_date_time: End date and time at which to stop computing statistics.
@@ -1719,7 +1717,6 @@ class FeatureGroupBase:
 
         return self._feature_monitoring_config_engine._build_default_feature_monitoring_config(
             name=name,
-            feature_name=feature_name,
             description=description,
             start_date_time=start_date_time,
             valid_feature_names=[feat.name for feat in self._features],
@@ -3544,9 +3541,9 @@ class FeatureGroup(FeatureGroupBase):
             "timeTravelFormat": self._time_travel_format,
             "features": self._features,
             "featurestoreId": self._feature_store_id,
-            "type": "cachedFeaturegroupDTO"
-            if not self._stream
-            else "streamFeatureGroupDTO",
+            "type": (
+                "cachedFeaturegroupDTO" if not self._stream else "streamFeatureGroupDTO"
+            ),
             "statisticsConfig": self._statistics_config,
             "eventTime": self.event_time,
             "expectationSuite": self._expectation_suite,
@@ -3824,9 +3821,11 @@ class ExternalFeatureGroup(FeatureGroupBase):
             # Got from Hopsworks, deserialize features and storage connector
             self._features = (
                 [
-                    feature.Feature.from_response_json(feat)
-                    if isinstance(feat, dict)
-                    else feat
+                    (
+                        feature.Feature.from_response_json(feat)
+                        if isinstance(feat, dict)
+                        else feat
+                    )
                     for feat in features
                 ]
                 if features
@@ -4209,9 +4208,11 @@ class ExternalFeatureGroup(FeatureGroupBase):
             "query": self._query,
             "dataFormat": self._data_format,
             "path": self._path,
-            "options": [{"name": k, "value": v} for k, v in self._options.items()]
-            if self._options
-            else None,
+            "options": (
+                [{"name": k, "value": v} for k, v in self._options.items()]
+                if self._options
+                else None
+            ),
             "storageConnector": self._storage_connector.to_dict(),
             "type": "onDemandFeaturegroupDTO",
             "statisticsConfig": self._statistics_config,
@@ -4357,9 +4358,11 @@ class SpineGroup(FeatureGroupBase):
             # Got from Hopsworks, deserialize features and storage connector
             self._features = (
                 [
-                    feature.Feature.from_response_json(feat)
-                    if isinstance(feat, dict)
-                    else feat
+                    (
+                        feature.Feature.from_response_json(feat)
+                        if isinstance(feat, dict)
+                        else feat
+                    )
                     for feat in features
                 ]
                 if features

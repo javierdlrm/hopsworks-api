@@ -46,7 +46,7 @@ HSFS_CLIENT_GET_INSTANCE = "hopsworks_common.client.get_instance"
 class TestFeatureMonitoringResultEngine:
     # Fetch results
 
-    def test_fetch_all_feature_monitoring_results_by_config_id_via_fg(self, mocker):
+    def test_get_by_config_id_via_fg(self, mocker):
         # Arrange
         start_time = "2022-01-01 10:10:10"
         end_time = "2022-02-02 20:20:20"
@@ -61,7 +61,7 @@ class TestFeatureMonitoringResultEngine:
         )
 
         # Act
-        result_engine.fetch_all_feature_monitoring_results_by_config_id(
+        result_engine.get_by_config_id(
             config_id=DEFAULT_CONFIG_ID,
             start_time=start_time,
             end_time=end_time,
@@ -83,7 +83,7 @@ class TestFeatureMonitoringResultEngine:
             == DEFAULT_MONITORING_TIME_SORT_BY
         )
 
-    def test_fetch_all_feature_monitoring_results_by_config_id_via_fv(self, mocker):
+    def test_get_by_config_id_via_fv(self, mocker):
         # Arrange
         start_time = "2022-01-01 01:01:01"
         end_time = "2022-02-02 02:02:02"
@@ -99,7 +99,7 @@ class TestFeatureMonitoringResultEngine:
         )
 
         # Act
-        result_engine.fetch_all_feature_monitoring_results_by_config_id(
+        result_engine.get_by_config_id(
             config_id=DEFAULT_CONFIG_ID,
             start_time=start_time,
             end_time=end_time,
@@ -143,7 +143,7 @@ class TestFeatureMonitoringResultEngine:
         )
 
         # Act
-        result_engine.save_feature_monitoring_result(result)
+        result_engine.save(result)
 
         # Assert
         assert result_create_api_mock.call_args[0][0] == result
@@ -167,7 +167,7 @@ class TestFeatureMonitoringResultEngine:
         )
 
         # Act
-        result_engine.save_feature_monitoring_result(result)
+        result_engine.save(result)
 
         # Assert
         assert result_create_api_mock.call_args[0][0] == result
@@ -335,7 +335,7 @@ class TestFeatureMonitoringResultEngine:
         )
         job_api_get_mock = mocker.patch(GET_JOB_API)
         result_engine_save_mock = mocker.patch(
-            "hsfs.core.feature_monitoring_result_engine.FeatureMonitoringResultEngine.save_feature_monitoring_result",
+            "hsfs.core.feature_monitoring_result_engine.FeatureMonitoringResultEngine.save",
         )
         result_engine = feature_monitoring_result_engine.FeatureMonitoringResultEngine(
             feature_store_id=DEFAULT_FEATURE_STORE_ID,
@@ -346,7 +346,7 @@ class TestFeatureMonitoringResultEngine:
         before_time = util.convert_event_time_to_timestamp(
             datetime.now() - timedelta(seconds=1)
         )
-        result_engine.save_feature_monitoring_result_with_exception(
+        result_engine.save_with_exception(
             config_id=DEFAULT_CONFIG_ID,
             job_name=DEFAULT_JOB_NAME,
         )
@@ -668,7 +668,7 @@ class TestFeatureMonitoringResultEngine:
     ):
         # Arrange
         result_engine_save_mock = mocker.patch(
-            "hsfs.core.feature_monitoring_result_engine.FeatureMonitoringResultEngine.save_feature_monitoring_result",
+            "hsfs.core.feature_monitoring_result_engine.FeatureMonitoringResultEngine.save",
         )
         result_engine_build_mock = mocker.patch(
             "hsfs.core.feature_monitoring_result_engine.FeatureMonitoringResultEngine.build_feature_monitoring_result",

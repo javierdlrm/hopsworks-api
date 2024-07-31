@@ -297,7 +297,7 @@ class TestPythonSparkTransformationFunctions:
             'feature_statistics = TransformationStatistics("feature")\n'
             "@udf(float)\n"
             "def standard_scaler(feature: pd.Series, statistics = feature_statistics) -> pd.Series:\n"
-            "    return (feature - statistics.feature.mean) / statistics.feature.stddev"
+            "    return (feature - statistics.feature.mean) / statistics.feature.std_dev"
         )
         udf_response = {
             "sourceCode": tf_fun_source,
@@ -320,9 +320,9 @@ class TestPythonSparkTransformationFunctions:
             )
         ]
         mean = statistics.mean([1, 2])
-        stddev = statistics.pstdev([1, 2])
+        std_dev = statistics.pstdev([1, 2])
         transformation_functions[0].transformation_statistics = [
-            FeatureDescriptiveStatistics(feature_name="col_0", mean=mean, stddev=stddev)
+            FeatureDescriptiveStatistics(feature_name="col_0", mean=mean, std_dev=std_dev)
         ]
 
         # Assert
@@ -385,9 +385,11 @@ class TestPythonSparkTransformationFunctions:
         ]
 
         mean = statistics.mean([1, 2])
-        stddev = statistics.pstdev([1, 2])
+        std_dev = statistics.pstdev([1, 2])
         transformation_functions[0].transformation_statistics = [
-            FeatureDescriptiveStatistics(feature_name="col_0", mean=mean, stddev=stddev)
+            FeatureDescriptiveStatistics(
+                feature_name="col_0", mean=mean, std_dev=std_dev
+            )
         ]
 
         # Assert
@@ -1022,9 +1024,11 @@ class TestPythonSparkTransformationFunctions:
             import datetime
 
             return pd.Series(
-                None
-                if data == datetime.datetime.utcfromtimestamp(1640995200)
-                else data + datetime.timedelta(milliseconds=1)
+                (
+                    None
+                    if data == datetime.datetime.utcfromtimestamp(1640995200)
+                    else data + datetime.timedelta(milliseconds=1)
+                )
                 for data in col_0
             )
 
