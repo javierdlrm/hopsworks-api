@@ -3375,7 +3375,7 @@ class FeatureView:
         elif not isinstance(feature_names, list):
             feature_names = [feature_names]
 
-        return self._feature_monitoring_config_engine._build_default_statistics_monitoring_config(
+        return self._feature_monitoring_config_engine._build_default_scheduled_statistics_config(
             name=name,
             feature_names=feature_names,
             description=description,

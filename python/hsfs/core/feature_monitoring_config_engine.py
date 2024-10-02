@@ -217,7 +217,8 @@ class FeatureMonitoringConfigEngine:
             and metric_lower not in VALID_FRACTIONAL_METRICS
         ):
             raise ValueError(
-                f"Invalid metric {metric_lower}. " "Supported metrics are {}.".format(
+                f"Invalid metric {metric_lower}. "
+                "Supported metrics are {}.".format(
                     set(VALID_FRACTIONAL_METRICS).union(set(VALID_CATEGORICAL_METRICS))
                 )
             )
@@ -418,13 +419,13 @@ class FeatureMonitoringConfigEngine:
 
     # builders
 
-    def _build_default_statistics_monitoring_config(
+    def _build_default_scheduled_statistics_config(
         self,
         name: str,
         feature_names: List[str],
+        valid_feature_names: Optional[List[str]],
         start_date_time: Optional[Union[str, int, date, datetime, pd.Timestamp]] = None,
         description: Optional[str] = None,
-        valid_feature_names: Optional[List[str]] = None,
         end_date_time: Optional[Union[str, int, date, datetime, pd.Timestamp]] = None,
         cron_expression: Optional[str] = "0 0 12 ? * * *",
     ) -> "fmc.FeatureMonitoringConfig":
@@ -434,30 +435,31 @@ class FeatureMonitoringConfigEngine:
             name: str, required
                 Name of the feature monitoring configuration, must be unique for
                 the feature view or feature group.
-            feature_name: str, optional
-                If provided, compute statistics only for this feature. If none,
-                defaults, compute statistics for all features.
+            feature_name: str Compute statistics only for these features.
+            valid_feature_names: List[str]
+                List of the feature names for the feature view or feature group.
+            start_date_time: Union[str, int, date, datetime, pd.Timestamp], optional
+                Statistics will start being computed on schedule from that time.
+            description: str, optional
+                Description of the feature monitoring configuration.
+            end_date_time: Union[str, int, date, datetime, pd.Timestamp], optional
+                Statistics will stop being computed on schedule from that time.
             cron_expression: str, optional
                 cron expression defining the schedule for computing statistics. The expression
                 must be in UTC timezone and based on Quartz cron syntax. Default is '0 0 12 ? * * *',
                 every day at 12pm UTC.
-            start_date_time: Union[str, int, date, datetime, pd.Timestamp], optional
-                Statistics will start being computed on schedule from that time.
-            end_date_time: Union[str, int, date, datetime, pd.Timestamp], optional
-                Statistics will stop being computed on schedule from that time.
-            description: str, optional
-                Description of the feature monitoring configuration.
-            valid_feature_names: List[str], optional
-                List of the feature names for the feature view or feature group.
 
         Returns:
             FeatureMonitoringConfig A Feature Monitoring Configuration to compute
               the statistics of a snapshot of all data present in the entity.
         """
+        assert feature_names is not None
+        assert valid_feature_names is not None
+
         self.validate_config_name(name)
         self.validate_description(description)
 
-        if feature_names is not None and valid_feature_names is not None:
+        if feature_names is not None:
             for f_name in feature_names:
                 self.validate_feature_name(f_name, valid_feature_names)
 
@@ -485,9 +487,9 @@ class FeatureMonitoringConfigEngine:
     def _build_default_feature_monitoring_config(
         self,
         name: str,
+        valid_feature_names: Optional[List[str]],
         start_date_time: Optional[Union[str, int, date, datetime, pd.Timestamp]] = None,
         description: Optional[str] = None,
-        valid_feature_names: Optional[List[str]] = None,
         end_date_time: Optional[Union[str, int, date, datetime, pd.Timestamp]] = None,
         cron_expression: Optional[str] = "0 0 12 ? * * *",
     ) -> "fmc.FeatureMonitoringConfig":
@@ -497,26 +499,25 @@ class FeatureMonitoringConfigEngine:
             name: str, required
                 Name of the feature monitoring configuration, must be unique for
                 the feature view or feature group.
-            feature_name: str, optional
-                If provided, compute statistics only for this feature. If none,
-                defaults, compute statistics for all features.
+            valid_feature_names: List[str], optional
+                List of the feature names for the feature view or feature group.
+            start_date_time: Union[str, int, date, datetime, pd.Timestamp], optional
+                Statistics will start being computed on schedule from that time.
+            description: str, optional
+                Description of the feature monitoring configuration.
+            end_date_time: Union[str, int, date, datetime, pd.Timestamp], optional
+                Statistics will stop being computed on schedule from that time.
             cron_expression: str, optional
                 cron expression defining the schedule for computing statistics. The expression
                 must be in UTC timezone and based on Quartz cron syntax. Default is '0 0 12 ? * * *',
                 every day at 12pm UTC.
-            start_date_time: Union[str, int, date, datetime, pd.Timestamp], optional
-                Statistics will start being computed on schedule from that time.
-            end_date_time: Union[str, int, date, datetime, pd.Timestamp], optional
-                Statistics will stop being computed on schedule from that time.
-            description: str, optional
-                Description of the feature monitoring configuration.
-            valid_feature_names: List[str], optional
-                List of the feature names for the feature view or feature group.
 
         Returns:
             FeatureMonitoringConfig A Feature Monitoring Configuration to compute
               the statistics of a snapshot of all data present in the entity.
         """
+        assert valid_feature_names is not None
+        
         self.validate_config_name(name)
         self.validate_description(description)
 
