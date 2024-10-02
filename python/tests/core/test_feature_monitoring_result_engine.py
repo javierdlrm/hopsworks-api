@@ -173,7 +173,7 @@ class TestFeatureMonitoringResultEngine:
         assert result_create_api_mock.call_args[0][0] == result
 
     # Build result
-    def test_build_statistics_monitoring_result_no_reference_stats(
+    def test_build_scheduled_statistics_result_no_reference_stats(
         self, mocker, backend_fixtures
     ):
         # Arrange

@@ -40,12 +40,41 @@ DEFAULT_JOB_SCHEDULE = {
 }
 
 
+VALID_CATEGORICAL_METRICS = [
+    "completeness",
+    "num_records_non_null",
+    "num_records_null",
+    "distinctness",
+    "entropy",
+    "uniqueness",
+    "approximate_num_distinct_values",
+    "exact_num_distinct_values",
+]
+VALID_FRACTIONAL_METRICS = [
+    "completeness",
+    "num_records_non_null",
+    "num_records_null",
+    "distinctness",
+    "entropy",
+    "uniqueness",
+    "approximate_num_distinct_values",
+    "exact_num_distinct_values",
+    "mean",
+    "max",
+    "min",
+    "sum",
+    "std_dev",
+    "count",
+]
+
+
 class TestFeatureMonitoringConfigEngine:
-    def test_build_default_statistics_monitoring_config(self, backend_fixtures):
+
+    def test_build_default_scheduled_statistics_config(self, backend_fixtures):
         # Arrange
         default_config = fmc.FeatureMonitoringConfig.from_response_json(
             backend_fixtures["feature_monitoring_config"][
-                "default_statistics_monitoring_config"
+                "default_scheduled_statistics_config"
             ]
         )
         config_engine = feature_monitoring_config_engine.FeatureMonitoringConfigEngine(
@@ -55,8 +84,10 @@ class TestFeatureMonitoringConfigEngine:
 
         # Act
         time_before = datetime.now()
-        config = config_engine._build_default_statistics_monitoring_config(
+        config = config_engine._build_default_scheduled_statistics_config(
             name=DEFAULT_NAME,
+            feature_names=["monitored_feature"],
+            valid_feature_names=["monitored_feature"],
         )
         time_after = datetime.now()
 
@@ -65,7 +96,6 @@ class TestFeatureMonitoringConfigEngine:
         assert config._feature_group_id == default_config._feature_group_id
         assert config._feature_view_name == default_config._feature_view_name
         assert config._feature_view_version == default_config._feature_view_version
-        assert config.feature_name == default_config._feature_name is None
         assert config.enabled == default_config.enabled is True
         assert config.name == DEFAULT_NAME
         assert config.description == default_config._description is None
@@ -105,3 +135,97 @@ class TestFeatureMonitoringConfigEngine:
             <= util.convert_event_time_to_timestamp(config.job_schedule.start_date_time)
             <= util.convert_event_time_to_timestamp(time_after)
         )
+
+    def test_build_default_feature_monitoring_config(self, backend_fixtures):
+        # Arrange
+        default_config = fmc.FeatureMonitoringConfig.from_response_json(
+            backend_fixtures["feature_monitoring_config"][
+                "default_statistics_comparison_config"
+            ]
+        )
+        config_engine = feature_monitoring_config_engine.FeatureMonitoringConfigEngine(
+            feature_store_id=DEFAULT_FEATURE_STORE_ID,
+            feature_group_id=DEFAULT_FEATURE_GROUP_ID,
+        )
+
+        # Act
+        time_before = datetime.now()
+        config = config_engine._build_default_feature_monitoring_config(
+            name=DEFAULT_NAME,
+            valid_feature_names=["monitored_feature"],
+        )
+        time_after = datetime.now()
+
+        # Assert
+        assert config._feature_store_id == default_config._feature_store_id
+        assert config._feature_group_id == default_config._feature_group_id
+        assert config._feature_view_name == default_config._feature_view_name
+        assert config._feature_view_version == default_config._feature_view_version
+        assert config.enabled == default_config.enabled is True
+        assert config.name == DEFAULT_NAME
+        assert config.description == default_config._description is None
+        assert (
+            config._feature_monitoring_type
+            == default_config._feature_monitoring_type
+            == fmc.FeatureMonitoringType.STATISTICS_COMPARISON
+        )
+        assert (
+            config.detection_window_config.window_config_type
+            == default_config.detection_window_config.window_config_type
+            == mwc.WindowConfigType.ALL_TIME
+        )
+        assert (
+            config.detection_window_config.time_offset
+            == default_config.detection_window_config.time_offset
+            is None
+        )
+        assert (
+            config.detection_window_config.window_length
+            == default_config.detection_window_config.window_length
+            is None
+        )
+        assert (
+            config.detection_window_config.row_percentage
+            == default_config.detection_window_config.row_percentage
+            == 1.0
+        )
+        assert (
+            config.job_schedule.cron_expression
+            == default_config.job_schedule.cron_expression
+            == "0 0 12 ? * * *"
+        )
+
+        assert (
+            util.convert_event_time_to_timestamp(time_before)
+            <= util.convert_event_time_to_timestamp(config.job_schedule.start_date_time)
+            <= util.convert_event_time_to_timestamp(time_after)
+        )
+
+    def test_valid_categorical_metrics(self):
+        # Arrange
+        config_engine = feature_monitoring_config_engine.FeatureMonitoringConfigEngine(
+            feature_store_id=DEFAULT_FEATURE_STORE_ID,
+            feature_group_id=DEFAULT_FEATURE_GROUP_ID,
+        )
+
+        # Assert
+        assert len(VALID_CATEGORICAL_METRICS) == len(
+            config_engine._VALID_CATEGORICAL_METRICS
+        )
+        assert VALID_CATEGORICAL_METRICS == config_engine._VALID_CATEGORICAL_METRICS
+
+    def test_valid_fractional_metrics(self):
+        # Arrange
+        config_engine = feature_monitoring_config_engine.FeatureMonitoringConfigEngine(
+            feature_store_id=DEFAULT_FEATURE_STORE_ID,
+            feature_group_id=DEFAULT_FEATURE_GROUP_ID,
+        )
+
+        # Assert
+        assert len(VALID_FRACTIONAL_METRICS) == len(
+            config_engine._VALID_FRACTIONAL_METRICS
+        )
+        assert VALID_CATEGORICAL_METRICS == config_engine._VALID_FRACTIONAL_METRICS
+
+
+# TODO: TEST VALIDATE FEATURES

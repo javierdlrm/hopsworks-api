@@ -75,7 +75,6 @@ class MonitoringWindowConfigEngine:
         time_offset: Optional[str] = None,
         window_length: Optional[str] = None,
         training_dataset_version: Optional[int] = None,
-        specific_value: Optional[Union[int, float]] = None,
         row_percentage: Optional[float] = None,
     ) -> "mwc.MonitoringWindowConfig":
         """Builds a monitoring window config.
@@ -83,7 +82,7 @@ class MonitoringWindowConfigEngine:
         Args:
             window_config_type: str, required
                 Type of the window config, can be either
-                `ROLLING_TIME`,`SPECIFIC_VALUE`,`TRAINING_DATASET`.
+                `ROLLING_TIME`, `ALL_TIME`,`TRAINING_DATASET`.
             time_offset: str, optional
                 monitoring window start time is computed as "now - time_offset".
             window_length: str, optional
@@ -91,8 +90,6 @@ class MonitoringWindowConfigEngine:
                     "now - time_offset + window_length".
             training_dataset_version: int, optional
                 Specific id of an entity that has fixed statistics.
-            specific_value: float, optional
-                Specific value instead of a statistics computed on data.
             row_percentage: float, optional
                 Percentage of rows to be used for statistics computation.
             id: int, optional
@@ -130,7 +127,6 @@ class MonitoringWindowConfigEngine:
             time_offset=time_offset,
             window_length=window_length,
             training_dataset_version=training_dataset_version,
-            specific_value=specific_value,
             row_percentage=row_percentage,
         )
 

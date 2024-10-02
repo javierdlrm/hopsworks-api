@@ -1684,18 +1684,20 @@ class FeatureGroupBase:
                 "Only Feature Group registered with Hopsworks can enable scheduled statistics."
             )
 
+        valid_feature_names = [feat.name for feat in self._features]
+
         if feature_names is None:
             # choose all features if none is selected
-            feature_names = [feat.name for feat in self._features]
+            feature_names = valid_feature_names
         elif not isinstance(feature_names, list):
             feature_names = [feature_names]
 
-        return self._feature_monitoring_config_engine._build_default_statistics_monitoring_config(
+        return self._feature_monitoring_config_engine._build_default_scheduled_statistics_config(
             name=name,
             feature_names=feature_names,
             description=description,
             start_date_time=start_date_time,
-            valid_feature_names=[feat.name for feat in self._features],
+            valid_feature_names=valid_feature_names,
             end_date_time=end_date_time,
             cron_expression=cron_expression,
         )
