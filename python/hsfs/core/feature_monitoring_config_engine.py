@@ -162,12 +162,12 @@ class FeatureMonitoringConfigEngine:
         self, statistics_comparison_config: StatisticsComparisonConfig
     ):
         if not isinstance(statistics_comparison_config.relative, bool):
-            raise ValueError("relative must be a boolean value.")
+            raise TypeError("relative must be a boolean value.")
 
         if not isinstance(statistics_comparison_config.strict, bool):
-            raise ValueError("strict must be a boolean value.")
+            raise TypeError("strict must be a boolean value.")
 
-        if not isinstance(statistics_comparison_config.threshold, (int, float)):
+        if statistics_comparison_config.threshold.__class__ not in (int, float):
             raise TypeError("threshold must be a numeric value.")
 
         if not isinstance(statistics_comparison_config.metric, str):
@@ -175,6 +175,13 @@ class FeatureMonitoringConfigEngine:
                 "metric must be a string value. "
                 "Check the documentation for a list of supported metrics."
             )
+        if statistics_comparison_config.specific_value is not None:
+            if statistics_comparison_config.specific_value.__class__ not in (
+                int,
+                float,
+            ):
+                raise TypeError("specific value must be a numeric value.")
+
         # TODO: [FSTORE-1205] Add more validation logic based on detection and reference window config.
         self.validate_statistics_metric(statistics_comparison_config.metric)
 
@@ -191,9 +198,11 @@ class FeatureMonitoringConfigEngine:
             )
 
     def validate_description(self, description: Optional[str]):
-        if description is not None and not isinstance(description, str):
+        if description is None:
+            return  # noop
+        if not isinstance(description, str):
             raise TypeError("Invalid description. Description must be a string.")
-        if description is not None and len(description) > 256:
+        if len(description) > 256:
             raise ValueError(
                 "Invalid description. Description must be less than 256 characters."
             )
@@ -201,11 +210,11 @@ class FeatureMonitoringConfigEngine:
     def validate_feature_name(
         self, feature_name: Optional[str], valid_feature_names: Optional[List[str]]
     ):
-        if valid_feature_names is None:
+        if feature_name is None or valid_feature_names is None:
             return  # noop
-        if feature_name is not None and not isinstance(feature_name, str):
+        if not isinstance(feature_name, str):
             raise TypeError("Invalid feature name. Feature name must be a string.")
-        if feature_name is not None and feature_name not in valid_feature_names:
+        if feature_name not in valid_feature_names:
             raise ValueError(
                 f"Invalid feature name. Feature name must be one of {valid_feature_names}."
             )
@@ -517,7 +526,7 @@ class FeatureMonitoringConfigEngine:
               the statistics of a snapshot of all data present in the entity.
         """
         assert valid_feature_names is not None
-        
+
         self.validate_config_name(name)
         self.validate_description(description)
 
