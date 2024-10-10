@@ -140,13 +140,21 @@ class Model:
         )
 
     @usage.method_logger
-    def download(self):
+    def download(self, include_model_files=True, include_artifact_files=False):
         """Download the model files.
+
+        # Arguments
+            include_model_files: Whether to download the model files or not
+            include_artifact_files: Whether to download the artifact files or not
 
         # Returns
             `str`: Absolute path to local folder containing the model files.
         """
-        return self._model_engine.download(model_instance=self)
+        return self._model_engine.download(
+            model_instance=self,
+            include_model_files=include_model_files,
+            include_artifact_files=include_artifact_files,
+        )
 
     @usage.method_logger
     def delete(self):
@@ -544,11 +552,15 @@ class Model:
     def version_path(self):
         """path of the model including version folder. Resolves to /Projects/{project_name}/Models/{name}/{version}"""
         return "{}/{}".format(self.model_path, str(self.version))
-    
+
     @property
     def files_path(self):
         """path of the model files including version and files folder. Resolves to /Projects/{project_name}/Models/{name}/{version}/Files"""
-        return "{}/{}/{}".format(self.model_path, str(self.version), constants.MODEL_REGISTRY.MODEL_FILES_DIR_NAME)
+        return "{}/{}/{}".format(
+            self.model_path,
+            str(self.version),
+            constants.MODEL_REGISTRY.MODEL_FILES_DIR_NAME,
+        )
 
     @property
     def shared_registry_project_name(self):

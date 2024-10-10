@@ -178,6 +178,27 @@ class ModelEngine:
 
         return n_dirs, n_files
 
+    def _download_model_files(self, files_type, from_hdfs_model_path, to_local_path):
+        def update_download_progress(n_dirs, n_files, done=False):
+            print(
+                "Downloading %s (%s dirs, %s files)... %s"
+                % (files_type, n_dirs, n_files, "DONE" if done else ""),
+                end="\r",
+            )
+
+        try:
+            if from_hdfs_model_path.startswith("hdfs:/"):
+                projects_index = from_hdfs_model_path.find("/Projects", 0)
+                from_hdfs_model_path = from_hdfs_model_path[projects_index:]
+
+            self._download_model_from_hopsfs(
+                from_hdfs_model_path=from_hdfs_model_path,
+                to_local_path=to_local_path,
+                update_download_progress=update_download_progress,
+            )
+        except BaseException as be:
+            raise be
+
     def _download_model_from_hopsfs(
         self, from_hdfs_model_path: str, to_local_path: str, update_download_progress
     ):
@@ -432,33 +453,45 @@ class ModelEngine:
 
         return model_instance
 
-    def download(self, model_instance):
+    def download(
+        self, model_instance, include_model_files=True, include_artifact_files=False
+    ):
+        if not include_model_files and not include_artifact_files:
+            raise ValueError(
+                "At least one of model files or artifact files must be specified for the download"
+            )
+
+        # create local directories
         model_name_path = os.path.join(
             tempfile.gettempdir(), str(uuid.uuid4()), model_instance._name
         )
         model_version_path = model_name_path + "/" + str(model_instance._version)
-        os.makedirs(model_version_path)
+        model_files_path = (
+            model_version_path
+            + "/"
+            + constants.MODEL_REGISTRY.MODEL_FILES_DIR_NAME.lower()
+        )
+        os.makedirs(model_files_path)
+        artifact_files_path = (
+            model_version_path
+            + "/"
+            + constants.MODEL_REGISTRY.ARTIFACTS_DIR_NAME.lower()
+        )
+        os.makedirs(artifact_files_path)
 
-        def update_download_progress(n_dirs, n_files, done=False):
-            print(
-                "Downloading model artifact (%s dirs, %s files)... %s"
-                % (n_dirs, n_files, "DONE" if done else ""),
-                end="\r",
+        # download model files
+        if include_model_files:
+            self._download_model_files(
+                files_type="model files",
+                from_hdfs_model_path=model_instance.files_path,
+                to_local_path=model_files_path,
             )
-
-        try:
-            from_hdfs_model_path = model_instance.files_path
-            if from_hdfs_model_path.startswith("hdfs:/"):
-                projects_index = from_hdfs_model_path.find("/Projects", 0)
-                from_hdfs_model_path = from_hdfs_model_path[projects_index:]
-
-            self._download_model_from_hopsfs(
-                from_hdfs_model_path=from_hdfs_model_path,
-                to_local_path=model_version_path,
-                update_download_progress=update_download_progress,
+        if include_artifact_files:
+            self._download_model_files(
+                files_type="artifact files",
+                from_hdfs_model_path=model_instance.artifact_version_path,
+                to_local_path=artifact_files_path,
             )
-        except BaseException as be:
-            raise be
 
         return model_version_path
 
