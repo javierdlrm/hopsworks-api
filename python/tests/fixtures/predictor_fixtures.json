@@ -44,6 +44,7 @@
           "environment_dto": {
             "name": "pandas-inference-pipeline"
           },
+          "additional_files": "/Resources/config.json,/Resources/tools/params.json",
           "project_namespace": "test"
         }
       ]
@@ -100,6 +101,7 @@
           "environment_dto": {
             "name": "pandas-inference-pipeline"
           },
+          "additional_files": "/Resources/config.json,/Resources/tools/params.json",
           "project_namespace": "test"
         },
         {
@@ -143,6 +145,7 @@
           "environment_dto": {
             "name": "pandas-inference-pipeline"
           },
+          "additional_files": "/Resources/config.json,/Resources/tools/params.json",
           "project_namespace": "test"
         }
       ]

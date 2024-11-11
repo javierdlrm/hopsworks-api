@@ -14,7 +14,7 @@
 #   limitations under the License.
 
 import json
-from typing import Optional, Union
+from typing import List, Optional, Union
 
 import humps
 from hsml import client, constants, deployment, util
@@ -62,6 +62,7 @@ class Predictor(DeployableComponent):
         creator: Optional[str] = None,
         api_protocol: Optional[str] = INFERENCE_ENDPOINTS.API_PROTOCOL_REST,
         environment: Optional[str] = None,
+        additional_files: Optional[List[str]] = None,
         project_namespace: str = None,
         **kwargs,
     ):
@@ -99,6 +100,7 @@ class Predictor(DeployableComponent):
         self._validate_script_file(self._model_framework, self._script_file)
         self._api_protocol = api_protocol
         self._environment = environment
+        self._additional_files = self._validate_additional_files(additional_files)
         self._project_namespace = project_namespace
 
     def deploy(self):
@@ -218,6 +220,18 @@ class Predictor(DeployableComponent):
         return PredictorResources(num_instances)
 
     @classmethod
+    def _validate_additional_files(
+        cls, additional_files: Optional[List[str]]
+    ) -> Optional[List[str]]:
+        if additional_files is not None:
+            # if no list of strings, raise an error
+            if not isinstance(additional_files, list) or not all(
+                isinstance(f, str) for f in additional_files
+            ):
+                raise ValueError("Additional files must be a list of strings.")
+        return additional_files
+
+    @classmethod
     def for_model(cls, model, **kwargs):
         kwargs["model_name"] = model.name
         kwargs["model_path"] = model.model_path
@@ -284,6 +298,13 @@ class Predictor(DeployableComponent):
         if "environment_dto" in json_decamelized:
             environment = json_decamelized.pop("environment_dto")
             kwargs["environment"] = environment["name"]
+        if "additional_files" in json_decamelized:
+            additional_files = json_decamelized.pop("additional_files")
+            kwargs["additional_files"] = (
+                additional_files.split(",")
+                if additional_files is not None
+                else additional_files
+            )
         kwargs["project_namespace"] = json_decamelized.pop("project_namespace")
         return kwargs
 
@@ -316,6 +337,8 @@ class Predictor(DeployableComponent):
         }
         if self.environment is not None:
             json = {**json, **{"environmentDTO": {"name": self._environment}}}
+        if self._additional_files is not None:
+            json["additionalFiles"] = ",".join(self._additional_files)
         if self._resources is not None:
             json = {**json, **self._resources.to_dict()}
         if self._inference_logger is not None:
@@ -495,6 +518,15 @@ class Predictor(DeployableComponent):
     @environment.setter
     def environment(self, environment):
         self._environment = environment
+
+    @property
+    def additional_files(self):
+        """Additional files to include in the deployment"""
+        return self._additional_files
+
+    @additional_files.setter
+    def additional_files(self, additional_files):
+        self._additional_files = additional_files
 
     @property
     def project_namespace(self):

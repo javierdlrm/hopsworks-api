@@ -489,8 +489,17 @@ class Deployment:
         self._predictor.environment = environment
 
     @property
+    def additional_files(self):
+        """Additional files included in the deployment"""
+        return self._predictor._additional_files
+
+    @additional_files.setter
+    def additional_files(self, additional_files: Union[str, List[str]]):
+        self._predictor._additional_files = additional_files
+
+    @property
     def project_namespace(self):
-        """Name of inference environment"""
+        """Name of the project namespace"""
         return self._predictor.project_namespace
 
     @project_namespace.setter

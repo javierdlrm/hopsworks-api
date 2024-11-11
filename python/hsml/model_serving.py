@@ -15,7 +15,7 @@
 #
 
 import os
-from typing import Optional, Union
+from typing import List, Optional, Union
 
 from hopsworks_common import usage
 from hsml import util
@@ -165,6 +165,8 @@ class ModelServing:
         inference_batcher: Optional[Union[InferenceBatcher, dict]] = None,
         transformer: Optional[Union[Transformer, dict]] = None,
         api_protocol: Optional[str] = IE.API_PROTOCOL_REST,
+        environment: Optional[str] = None,
+        additional_files: Optional[Union[str, List[str]]] = None,
     ):
         """Create a Predictor metadata object.
 
@@ -202,6 +204,8 @@ class ModelServing:
             inference_batcher: Inference batcher configuration.
             transformer: Transformer to be deployed together with the predictor.
             api_protocol: API protocol to be enabled in the deployment (i.e., 'REST' or 'GRPC'). Defaults to 'REST'.
+            environment: The inference environment to use
+            additional_files: A list of paths to additional files to be included in the deployment artifact. The files can be located in both the local or Hopsworks file system.
 
         # Returns
             `Predictor`. The predictor metadata object.
@@ -221,6 +225,8 @@ class ModelServing:
             inference_batcher=inference_batcher,
             transformer=transformer,
             api_protocol=api_protocol,
+            environment=environment,
+            additional_files=additional_files,
         )
 
     @usage.method_logger
@@ -296,7 +302,7 @@ class ModelServing:
         self,
         predictor: Predictor,
         name: Optional[str] = None,
-        environment: Optional[str] = None,
+        description: Optional[str] = None,
     ):
         """Create a Deployment metadata object.
 
@@ -360,13 +366,13 @@ class ModelServing:
         # Arguments
             predictor: predictor to be used in the deployment
             name: name of the deployment
-            environment: The inference environment to use
+            description: description of the deployment
 
         # Returns
             `Deployment`. The model metadata object.
         """
 
-        return Deployment(predictor=predictor, name=name, environment=environment)
+        return Deployment(predictor=predictor, name=name, description=description)
 
     @property
     def project_name(self):

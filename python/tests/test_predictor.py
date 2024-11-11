@@ -79,6 +79,7 @@ class TestPredictor:
         assert p.api_protocol == p_json["api_protocol"]
         assert p.artifact_version == p_json["artifact_version"]
         assert p.environment == p_json["environment_dto"]["name"]
+        assert p.additional_files == p_json["additional_files"].split(",")
         assert p.script_file == p_json["predictor"]
         assert isinstance(p.resources, resources.PredictorResources)
         assert isinstance(p.transformer, transformer.Transformer)
@@ -121,6 +122,7 @@ class TestPredictor:
             assert p.serving_tool == p_json["serving_tool"]
             assert p.api_protocol == p_json["api_protocol"]
             assert p.environment == p_json["environment_dto"]["name"]
+            assert p.additional_files == p_json["additional_files"].split(",")
             assert p.artifact_version == p_json["artifact_version"]
             assert p.script_file == p_json["predictor"]
             assert isinstance(p.resources, resources.PredictorResources)
@@ -159,6 +161,7 @@ class TestPredictor:
         assert p.serving_tool == p_json["serving_tool"]
         assert p.api_protocol == p_json["api_protocol"]
         assert p.environment == p_json["environment_dto"]["name"]
+        assert p.additional_files == p_json["additional_files"].split(",")
         assert p.artifact_version == p_json["artifact_version"]
         assert p.script_file == p_json["predictor"]
         assert isinstance(p.resources, resources.PredictorResources)
@@ -211,6 +214,7 @@ class TestPredictor:
             serving_tool=p_json["serving_tool"],
             api_protocol=p_json["api_protocol"],
             environment=p_json["environment_dto"]["name"],
+            additional_files=p_json["additional_files"].split(","),
             artifact_version=p_json["artifact_version"],
             script_file=p_json["predictor"],
             resources=p_json["predictor_resources"],
@@ -239,6 +243,7 @@ class TestPredictor:
         assert p.serving_tool == p_json["serving_tool"]
         assert p.api_protocol == p_json["api_protocol"]
         assert p.environment == p_json["environment_dto"]["name"]
+        assert p.additional_files == p_json["additional_files"].split(",")
         assert p.artifact_version == p_json["artifact_version"]
         assert p.script_file == p_json["predictor"]
         assert isinstance(p.resources, resources.PredictorResources)
@@ -604,6 +609,47 @@ class TestPredictor:
         assert isinstance(res, resources.PredictorResources)
         assert res.num_instances == 0
 
+    # validate additional files
+
+    def test_validate_additional_files_none(self):
+        # Act
+        af = predictor.Predictor._validate_additional_files(None)
+
+        # Assert
+        assert af is None
+
+    def test_validate_additional_files_valid(self, mocker):
+        # Arrange
+        additional_files = ["file/1", "file/2"]
+
+        # Act
+        af = predictor.Predictor._validate_additional_files(additional_files)
+
+        # Assert
+        assert af == additional_files
+
+    def test_validate_additional_files_invalid_str(self, mocker):
+        # Arrange
+        additional_files = "nolist-invalid"
+
+        # Act
+        with pytest.raises(ValueError) as e_info:
+            _ = predictor.Predictor._validate_additional_files(additional_files)
+
+        # Assert
+        assert "must be a list of strings" in str(e_info.value)
+
+    def test_validate_additional_files_invalid_list_with_int(self, mocker):
+        # Arrange
+        additional_files = ["list-of-strings-invalid", 2]
+
+        # Act
+        with pytest.raises(ValueError) as e_info:
+            _ = predictor.Predictor._validate_additional_files(additional_files)
+
+        # Assert
+        assert "must be a list of strings" in str(e_info.value)
+
     # for model
 
     def test_for_model(self, mocker):
@@ -670,6 +716,7 @@ class TestPredictor:
         )
         assert kwargs["api_protocol"] == p_json["api_protocol"]
         assert kwargs["environment"] == p_json["environment_dto"]["name"]
+        assert kwargs["additional_files"] == p_json["additional_files"].split(",")
         assert isinstance(kwargs["transformer"], transformer.Transformer)
         assert kwargs["transformer"].script_file == p_json["transformer"]
         assert isinstance(

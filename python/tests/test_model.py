@@ -217,6 +217,7 @@ class TestModel:
             transformer=transformer,
             api_protocol=p_json["api_protocol"],
             environment=p_json["environment_dto"]["name"],
+            additional_files=p_json["additional_files"],
         )
 
         # Assert
@@ -233,6 +234,7 @@ class TestModel:
             transformer=transformer,
             api_protocol=p_json["api_protocol"],
             environment=p_json["environment_dto"]["name"],
+            additional_files=p_json["additional_files"],
         )
         mock_predictor.deploy.assert_called_once()
 

@@ -18,7 +18,7 @@ import json
 import logging
 import os
 import warnings
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 import humps
 from hopsworks_common import usage
@@ -199,6 +199,7 @@ class Model:
         transformer: Optional[Union[Transformer, dict]] = None,
         api_protocol: Optional[str] = IE.API_PROTOCOL_REST,
         environment: Optional[str] = None,
+        additional_files: Optional[List[str]] = None,
     ):
         """Deploy the model.
 
@@ -230,6 +231,7 @@ class Model:
             transformer: Transformer to be deployed together with the predictor.
             api_protocol: API protocol to be enabled in the deployment (i.e., 'REST' or 'GRPC'). Defaults to 'REST'.
             environment: The inference environment to use.
+            additional_files: A list of paths to additional files to be included in the deployment artifact. The files can be located in both the local or Hopsworks file system.
 
         # Returns
             `Deployment`: The deployment metadata object of a new or existing deployment.
@@ -251,6 +253,7 @@ class Model:
             transformer=transformer,
             api_protocol=api_protocol,
             environment=environment,
+            additional_files=additional_files,
         )
 
         return predictor.deploy()

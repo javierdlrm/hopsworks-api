@@ -411,32 +411,311 @@ class ServingEngine:
 
         return local_path
 
-    def create(self, deployment_instance):
-        try:
-            self._serving_api.put(deployment_instance)
-            print("Deployment created, explore it at " + deployment_instance.get_url())
-        except RestAPIError as re:
-            raise_err = True
-            if re.error_code == ModelServingException.ERROR_CODE_DUPLICATED_ENTRY:
-                msg = "Deployment with the same name already exists"
-                existing_deployment = self._serving_api.get(deployment_instance.name)
-                if (
-                    existing_deployment.model_name == deployment_instance.model_name
-                    and existing_deployment.model_version
-                    == deployment_instance.model_version
-                ):  # if same name and model version, retrieve existing deployment
-                    print(msg + ". Getting existing deployment...")
-                    print("To create a new deployment choose a different name.")
-                    deployment_instance.update_from_response_json(
-                        existing_deployment.to_dict()
+    def _upload_local_file(
+        self,
+        from_local_file_path,
+        to_hopsfs_file_path,
+        update_upload_progress,
+        upload_configuration=None,
+    ):
+        """Copy or upload artifact files from a local path to the deployment temporary directory in the Models dataset."""
+        n_dirs, n_files = 0, 0
+        if os.path.isdir(from_local_file_path):
+            to_hopsfs_file_paths = []
+            # if path is a dir, upload files and folders iteratively
+            for root, dirs, files in os.walk(from_local_file_path):
+                # os.walk(from_local_file_path), where from_local_file_path is expected to be an absolute path
+                # - root is the absolute path of the directory being walked
+                # - dirs is the list of directory names present in the root dir
+                # - files is the list of file names present in the root dir
+                # we need to replace the local path prefix with the hdfs path prefix (i.e., /srv/hops/....../root with /Projects/.../)
+                remote_base_path = root.replace(
+                    from_local_file_path, to_hopsfs_file_path
+                )
+                for d_name in dirs:
+                    self._engine.mkdir(remote_base_path + "/" + d_name)
+                    n_dirs += 1
+                    if update_upload_progress is not None:
+                        update_upload_progress(n_dirs, n_files)
+                for f_name in files:
+                    print(
+                        "// ---> Foreach file in dir, upload file",
+                        root + "/" + f_name,
+                        " - to - ",
+                        remote_base_path,
                     )
-                    raise_err = False
-                else:  # otherwise, raise an exception
-                    print(", but it is serving a different model version.")
-                    print("Please, choose a different name.")
+                    self._engine.upload(
+                        root + "/" + f_name,
+                        remote_base_path,
+                        upload_configuration=upload_configuration,
+                    )
+                    n_files += 1
+                    if update_upload_progress is not None:
+                        update_upload_progress(n_dirs, n_files)
 
-            if raise_err:
-                raise re
+                    to_hopsfs_file_paths.append(remote_base_path + "/" + f_name)
+            return to_hopsfs_file_paths
+        else:
+            # if path is a file, upload file
+            print(
+                "// ---> Path is file, upload file",
+                from_local_file_path,
+                " - to - ",
+                to_hopsfs_file_path,
+            )
+            self._engine.upload(
+                from_local_file_path,
+                to_hopsfs_file_path,
+                upload_configuration=upload_configuration,
+            )
+            n_files += 1
+            if update_upload_progress is not None:
+                update_upload_progress(n_dirs, n_files)
+
+            return [to_hopsfs_file_path + "/" + os.path.basename(from_local_file_path)]
+
+    def _upload_file_from_local_or_hopsfs_mount(
+        self,
+        local_file_path,
+        hopsfs_file_path,
+        update_upload_progress,
+        upload_configuration=None,
+    ):
+        """Save artifact files from a local path. The local path can be on hopsfs mount"""
+        # check hopsfs mount
+        if local_file_path.startswith(constants.MODEL_REGISTRY.HOPSFS_MOUNT_PREFIX):
+            # file(s) already in hopsfs
+            print("// -> It is hopsfsmount path", local_file_path)
+            return [
+                local_file_path.replace(
+                    constants.MODEL_REGISTRY.HOPSFS_MOUNT_PREFIX, "/"
+                )
+            ]
+        else:
+            print(
+                "// -> It is local environment path",
+                local_file_path,
+                " - to - ",
+                hopsfs_file_path,
+            )
+            return self._upload_local_file(
+                from_local_file_path=local_file_path,
+                to_hopsfs_file_path=hopsfs_file_path,
+                update_upload_progress=update_upload_progress,
+                upload_configuration=upload_configuration,
+            )
+
+    def _upload_files_to_hopsfs(
+        self, file_path, hopsfs_path, update_upload_progress, upload_configuration
+    ):
+        # check local absolute
+        if os.path.isabs(file_path) and os.path.exists(file_path):
+            print("// -> It is absolute path", file_path, " - to - ", hopsfs_path)
+            return self._upload_file_from_local_or_hopsfs_mount(
+                local_file_path=file_path,
+                hopsfs_file_path=hopsfs_path,
+                update_upload_progress=update_upload_progress,
+                upload_configuration=upload_configuration,
+            )
+        # check local relative
+        elif os.path.exists(
+            os.path.join(os.getcwd(), file_path)
+        ):  # check local relative
+            print("// -> It is relative path", file_path, " - to - ", hopsfs_path)
+            return self._upload_file_from_local_or_hopsfs_mount(
+                local_file_path=file_path,
+                hopsfs_file_path=hopsfs_path,
+                update_upload_progress=update_upload_progress,
+                upload_configuration=upload_configuration,
+            )
+        # check project relative
+        elif self._dataset_api.path_exists(
+            file_path
+        ):  # check hdfs relative and absolute
+            # file(s) already in hopsfs
+            print("// -> It is hopsfs path", file_path)
+            return file_path  # noop
+        else:
+            raise IOError(
+                "Could not find path {} in the local filesystem or in Hopsworks File System".format(
+                    file_path
+                )
+            )
+
+    def _upload_additional_files_to_hopsfs(
+        self,
+        deployment_instance,
+        hopsfs_path,
+        update_upload_progress,
+        upload_configuration,
+    ):
+        additional_file_paths = []
+        for file_path in deployment_instance.additional_files:
+            hopsfs_paths = self._upload_files_to_hopsfs(
+                file_path=file_path,
+                hopsfs_path=hopsfs_path,
+                update_upload_progress=update_upload_progress,
+                upload_configuration=upload_configuration,
+            )
+            additional_file_paths.append(*hopsfs_paths)
+        return additional_file_paths
+
+    def _check_deployment_exists(self, deployment_instance):
+        try:
+            existing_deployment = self._serving_api.get(deployment_instance.name)
+        except RestAPIError as e:
+            if e.error_code == ModelServingException.ERROR_CODE_SERVING_NOT_FOUND:
+                existing_deployment = None  # if not found, set to None
+            else:
+                raise e
+
+        if existing_deployment is not None:
+            msg = "Deployment with the same name already exists"
+            if (
+                existing_deployment.model_name == deployment_instance.model_name
+                and existing_deployment.model_version
+                == deployment_instance.model_version
+            ):  # if same name and model version, retrieve existing deployment
+                print(msg + ".")
+                print("To create a new deployment choose a different name.")
+                deployment_instance.update_from_response_json(
+                    existing_deployment.to_dict()
+                )
+                existing_deployment = deployment_instance
+            else:  # otherwise, raise an exception
+                print(", but it is serving a different model version.")
+                print("Please, choose a different name.")
+                raise ValueError(
+                    "A deployment with the same name and model version already exists."
+                )
+
+        return existing_deployment
+
+    def create(self, deployment_instance, upload_configuration=None):
+        pbar = tqdm(
+            [
+                {"id": 0, "desc": "Checking existing deployments"},
+                {"id": 1, "desc": "Creating temporary folder"},
+                {"id": 2, "desc": "Uploading predictor and transformer scripts"},
+                {"id": 3, "desc": "Uploading additional files"},
+                {"id": 4, "desc": "Creating deployment"},
+                {"id": 5, "desc": "Deleting temporary folder"},
+                {"id": 6, "desc": "Deployment creation complete"},
+            ]
+        )
+
+        for step in pbar:
+            try:
+                pbar.set_description("%s" % step["desc"])
+                if step["id"] == 0:
+                    existing_deployment = self._check_deployment_exists(
+                        deployment_instance
+                    )
+                    if existing_deployment is not None:
+                        return existing_deployment  # if deployment exists, stop creation process
+                if step["id"] == 1:
+                    # Create temporary folder
+                    temporary_dir_in_hopsfs = os.path.join(
+                        deployment_instance.model_path,
+                        str(uuid.uuid4()),
+                    )
+                    self._engine.mkdir(temporary_dir_in_hopsfs)
+                if step["id"] == 2:
+                    # Upload predictor and transformer scripts to /Models/<temporary_folder> if local paths
+                    if (
+                        deployment_instance.predictor is not None
+                        and deployment_instance.predictor.script_file is not None
+                    ):
+                        deployment_instance.predictor.script_file = (
+                            self._upload_files_to_hopsfs(
+                                file_path=deployment_instance.predictor.script_file,
+                                hopsfs_path=temporary_dir_in_hopsfs,
+                                update_upload_progress=None,
+                                upload_configuration=upload_configuration,
+                            )
+                        )
+                    if (
+                        deployment_instance.transformer is not None
+                        and deployment_instance.transformer.script_file is not None
+                    ):
+                        deployment_instance.transformer.script_file = (
+                            self._upload_files_to_hopsfs(
+                                file_path=deployment_instance.transformer.script_file,
+                                hopsfs_path=temporary_dir_in_hopsfs,
+                                update_upload_progress=None,
+                                upload_configuration=upload_configuration,
+                            )
+                        )
+                if step["id"] == 3:
+                    # Upload additional files to /Models/<temporary_folder> if local paths
+                    if deployment_instance.additional_files is not None:
+
+                        def update_upload_progress(n_dirs=0, n_files=0, step=step):
+                            pbar.set_description(
+                                "%s (%s dirs, %s files)"
+                                % (step["desc"], n_dirs, n_files)
+                            )
+
+                        update_upload_progress(n_dirs=0, n_files=0)
+
+                        deployment_instance.additional_files = (
+                            self._upload_additional_files_to_hopsfs(
+                                deployment_instance,
+                                hopsfs_path=temporary_dir_in_hopsfs,
+                                update_upload_progress=update_upload_progress,
+                                upload_configuration=upload_configuration,
+                            )
+                        )
+                if step["id"] == 4:
+                    print(
+                        "// -> Create deployment: ", str(deployment_instance.to_dict())
+                    )
+                    try:
+                        # Create deployment
+                        self._serving_api.put(deployment_instance)
+                        print(
+                            "Deployment created, explore it at "
+                            + deployment_instance.get_url()
+                        )
+                    except RestAPIError as re:
+                        raise_err = True
+                        if (
+                            re.error_code
+                            == ModelServingException.ERROR_CODE_DUPLICATED_ENTRY
+                        ):
+                            msg = "Deployment with the same name already exists"
+                            existing_deployment = self._serving_api.get(
+                                deployment_instance.name
+                            )
+                            if (
+                                existing_deployment.model_name
+                                == deployment_instance.model_name
+                                and existing_deployment.model_version
+                                == deployment_instance.model_version
+                            ):  # if same name and model version, retrieve existing deployment
+                                print(msg + ". Getting existing deployment...")
+                                print(
+                                    "To create a new deployment choose a different name."
+                                )
+                                deployment_instance.update_from_response_json(
+                                    existing_deployment.to_dict()
+                                )
+                                raise_err = False
+
+                            else:  # otherwise, raise an exception
+                                print(", but it is serving a different model version.")
+                                print("Please, choose a different name.")
+
+                        if raise_err:
+                            raise re
+                if step["id"] == 5:
+                    self._dataset_api.rm(temporary_dir_in_hopsfs)
+                    pass
+                if step["id"] == 6:
+                    pass
+            except BaseException as be:
+                self._dataset_api.rm(temporary_dir_in_hopsfs)
+                raise be
 
         if deployment_instance.is_stopped():
             print("Before making predictions, start the deployment by using `.start()`")

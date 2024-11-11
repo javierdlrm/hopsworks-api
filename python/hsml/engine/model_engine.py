@@ -333,15 +333,6 @@ class ModelEngine:
                 )
             )
 
-        # Create /Models/{model_instance._name} folder
-        dataset_model_name_path = dataset_models_root_path + "/" + model_instance._name
-        if not self._dataset_api.path_exists(dataset_model_name_path):
-            self._engine.mkdir(dataset_model_name_path)
-
-        model_instance = self._set_model_version(
-            model_instance, dataset_models_root_path, dataset_model_name_path
-        )
-
         # Attach model summary xattr to /Models/{model_instance._name}/{model_instance._version}
         model_query_params = {}
 
@@ -365,7 +356,19 @@ class ModelEngine:
             try:
                 pbar.set_description("%s" % step["desc"])
                 if step["id"] == 0:
-                    # Create folders
+                    # Create /Models/{model_instance._name} folder
+                    dataset_model_name_path = (
+                        dataset_models_root_path + "/" + model_instance._name
+                    )
+                    if not self._dataset_api.path_exists(dataset_model_name_path):
+                        self._engine.mkdir(dataset_model_name_path)
+
+                    model_instance = self._set_model_version(
+                        model_instance,
+                        dataset_models_root_path,
+                        dataset_model_name_path,
+                    )
+                    # Create model version and files folders
                     self._engine.mkdir(model_instance.version_path)
                     self._engine.mkdir(model_instance.model_files_path)
                 if step["id"] == 1:
