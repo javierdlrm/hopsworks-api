@@ -51,6 +51,9 @@ class HdfsApi:
         :param buffer_size: size of the temporary read and write buffer. Defaults to 0.
         :type buffer_size: int
         """
+
+        print("[HOPSWORKS-API] HdfsApi upload")
+
         # local path could be absolute or relative,
         if not os.path.isabs(local_path) and os.path.exists(
             os.path.join(os.getcwd(), local_path)
@@ -89,5 +92,7 @@ class HdfsApi:
         :param buffer_size: size of the temporary read and write buffer. Defaults to 0.
         :type buffer_size: int
         """
+
+        print("[HOPSWORKS-API] HdfsApi download")
 
         self._hopsfs.download(path, local_path, recursive=True, buffer_size=buffer_size)

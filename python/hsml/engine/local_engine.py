@@ -27,8 +27,10 @@ class LocalEngine:
 
         try:
             self._hdfs_api = hdfs_api.HdfsApi()
+            print("[LocalEngine] init, hdfs_api ready")
         except Exception:
             self._hdfs_api = None
+            print("[LocalEngine] init, hdfs_api NOT ready")
 
     def mkdir(self, remote_path: str):
         remote_path = self._prepend_project_path(remote_path)
