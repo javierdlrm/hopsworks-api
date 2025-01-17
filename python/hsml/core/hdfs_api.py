@@ -53,13 +53,15 @@ class HdfsApi:
         for f in os.listdir(os.environ["ARROW_LIBHDFS_DIR"]):
             print("- file: ", f)
 
-        print("[HOPSWORKS-API] HdfsApi init, accessing LIBHDFS_DEFAULT_FS")
+        print("[HOPSWORKS-API] HdfsApi init, list env vars")
+        print("---- LIBHDFS_DEFAULT_FS: ", os.environ["LIBHDFS_DEFAULT_FS"])
+        print("---- LIBHDFS_DEFAULT_USER: ", os.environ["LIBHDFS_DEFAULT_USER"])
+        print("---- ARROW_LIBHDFS_DIR: ", os.environ["ARROW_LIBHDFS_DIR"])
+
+        print("---", end="\n")
+
         host, port = os.environ["LIBHDFS_DEFAULT_FS"].split(":")
-
-        print("[HOPSWORKS-API] HdfsApi init, accessing LIBHDFS_DEFAULT_USER")
         _ = os.environ["LIBHDFS_DEFAULT_USER"]
-
-        print("[HOPSWORKS-API] HdfsApi init, init client")
 
         try:
             self._hopsfs = pfs.HadoopFileSystem(
