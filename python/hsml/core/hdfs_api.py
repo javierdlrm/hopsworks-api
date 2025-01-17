@@ -49,6 +49,10 @@ class HdfsApi:
         # for pyarrow HadoopFileSystem
         os.environ["ARROW_LIBHDFS_DIR"] = "/usr/local/bin/libhdfs-golang"
 
+        print("[HOPSWORKS-API] HdfsApi init, list files libhdfs-golang")
+        for f in os.listdir(os.environ["ARROW_LIBHDFS_DIR"]):
+            print("- file: ", f)
+
         print("[HOPSWORKS-API] HdfsApi init, accessing LIBHDFS_DEFAULT_FS")
         host, port = os.environ["LIBHDFS_DEFAULT_FS"].split(":")
 
