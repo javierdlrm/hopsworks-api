@@ -42,6 +42,9 @@ class HdfsApi:
         else:
             print("--- LIBHDFS_DEFAULT_USER available in environment")
 
+        if "LD_LIBRARY_PATH" not in os.environ:
+            print("--- LD_LIBRARY_PATH not in environment!!!")
+
         # for libhdfs logging
         os.environ["LIBHDFS_ENABLE_LOG"] = "true"
         # export LIBHDFS_LOG_FILE="/tmp/libhdfs.log"
@@ -57,6 +60,7 @@ class HdfsApi:
         print("---- LIBHDFS_DEFAULT_FS: ", os.environ["LIBHDFS_DEFAULT_FS"])
         print("---- LIBHDFS_DEFAULT_USER: ", os.environ["LIBHDFS_DEFAULT_USER"])
         print("---- ARROW_LIBHDFS_DIR: ", os.environ["ARROW_LIBHDFS_DIR"])
+        print("---- LD_LIBRARY_PATH: ", os.environ["LD_LIBRARY_PATH"])
 
         print("---", end="\n")
 
