@@ -22,10 +22,17 @@ import os
 class HdfsApi:
     def __init__(self):
 
+        print("[HOPSWORKS-API] HdfsApi init, importing fsspec")
+
         import fsspec.implementations.arrow as pfs
 
+        print("[HOPSWORKS-API] HdfsApi init, accessing LIBHDFS_DEFAULT_FS")
         host, port = os.environ["LIBHDFS_DEFAULT_FS"].split(":")
 
+        print("[HOPSWORKS-API] HdfsApi init, accessing LIBHDFS_DEFAULT_USER")
+        _ = os.environ["LIBHDFS_DEFAULT_USER"]
+
+        print("[HOPSWORKS-API] HdfsApi init, init client")
         self._hopsfs = pfs.HadoopFileSystem(
             host=host,
             port=int(port),
