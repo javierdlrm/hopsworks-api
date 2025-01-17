@@ -26,6 +26,29 @@ class HdfsApi:
 
         import fsspec.implementations.arrow as pfs
 
+        print("[HOPSWORKS-API] HdfsApi init, checking env vars...")
+
+        if "LIBHDFS_DEFAULT_FS" not in os.environ:
+            print("--- LIBHDFS_DEFAULT_FS not in environment, setting...")
+            os.environ["LIBHDFS_DEFAULT_FS"] = (
+                "namenode.service.consul:" + os.environ["NAMENODE_PORT"]
+            )
+        else:
+            print("--- LIBHDFS_DEFAULT_FS available in environment")
+
+        if "LIBHDFS_DEFAULT_USER" not in os.environ:
+            print("--- LIBHDFS_DEFAULT_USER not in environment, setting...")
+            os.environ["LIBHDFS_DEFAULT_USER"] = os.environ["HADOOP_USER_NAME"]
+        else:
+            print("--- LIBHDFS_DEFAULT_USER available in environment")
+
+        # for libhdfs logging
+        os.environ["LIBHDFS_ENABLE_LOG"] = "true"
+        # export LIBHDFS_LOG_FILE="/tmp/libhdfs.log"
+
+        # for pyarrow HadoopFileSystem
+        os.environ["ARROW_LIBHDFS_DIR"] = "/usr/local/bin/libhdfs-golang"
+
         print("[HOPSWORKS-API] HdfsApi init, accessing LIBHDFS_DEFAULT_FS")
         host, port = os.environ["LIBHDFS_DEFAULT_FS"].split(":")
 
