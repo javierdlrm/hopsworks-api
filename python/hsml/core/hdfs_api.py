@@ -56,11 +56,17 @@ class HdfsApi:
         _ = os.environ["LIBHDFS_DEFAULT_USER"]
 
         print("[HOPSWORKS-API] HdfsApi init, init client")
-        self._hopsfs = pfs.HadoopFileSystem(
-            host=host,
-            port=int(port),
-            user=os.environ["LIBHDFS_DEFAULT_USER"],
-        )
+
+        try:
+            self._hopsfs = pfs.HadoopFileSystem(
+                host=host,
+                port=int(port),
+                user=os.environ["LIBHDFS_DEFAULT_USER"],
+            )
+        except Exception as e:
+            print("Exception!!! e: ", e)
+            print(str(e))
+            raise e
 
     DEFAULT_BUFFER_SIZE = 0
 
