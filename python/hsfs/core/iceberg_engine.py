@@ -224,6 +224,12 @@ class IcebergEngine:
     ICEBERG_START_SNAPSHOT_ID = "start-snapshot-id"
     ICEBERG_END_SNAPSHOT_ID = "end-snapshot-id"
     ICEBERG_DOT_PREFIX = "iceberg."
+    # Iceberg's vectorized (Arrow) reader can crash the executor JVM with a
+    # SIGSEGV in the shaded Arrow bounds check (FSTORE-2067), so tables are
+    # created with Parquet vectorization disabled and every reader falls back
+    # to the row-based path.
+    # Remove together with the FSTORE-2067 fix.
+    ICEBERG_TABLE_PROPERTIES = {"read.parquet.vectorization.enabled": "false"}
     ICEBERG_CATALOG_OPTION = "iceberg.catalog"
     ICEBERG_CATALOG_PROP_PREFIX = "iceberg.catalog."
     ICEBERG_CATALOG_TABLE_IDENTIFIER_OPTION = "iceberg.catalog.table-identifier"
@@ -369,6 +375,8 @@ class IcebergEngine:
             self._feature_group.sort_order
         )
         properties = jvm.java.util.HashMap()
+        for prop, value in self.ICEBERG_TABLE_PROPERTIES.items():
+            properties.put(prop, value)
         if sort_fields:
             # Range distribution organizes new writes by the sort order
             # without waiting for a rewrite.
@@ -448,9 +456,12 @@ class IcebergEngine:
         statement = (
             f"CREATE TABLE {qualified} ({schema_ddl}) USING {self.ICEBERG_SPARK_FORMAT}"
         )
+        properties = dict(self.ICEBERG_TABLE_PROPERTIES)
         if clauses:
             statement += f" PARTITIONED BY ({', '.join(clauses)})"
-            statement += " TBLPROPERTIES ('write.distribution-mode'='hash')"
+            properties["write.distribution-mode"] = "hash"
+        props_ddl = ", ".join(f"'{k}'='{v}'" for k, v in properties.items())
+        statement += f" TBLPROPERTIES ({props_ddl})"
         _logger.debug(f"Creating Iceberg catalog table: {statement}")
         self._spark_session.sql(statement)
 
@@ -1746,6 +1757,7 @@ class IcebergEngine:
             )
         transforms = self._partition_spec_transforms()
         properties = {"write.distribution-mode": "hash"} if transforms else {}
+        properties.update(self.ICEBERG_TABLE_PROPERTIES)
         table = catalog.create_table(
             self._pyiceberg_identifier(),
             schema=arrow_schema,
@@ -2015,13 +2027,22 @@ class IcebergEngine:
                 )
             with contextlib.suppress(NamespaceAlreadyExistsError):
                 catalog.create_namespace(Catalog.namespace_from(identifier))
+            transforms = self._partition_spec_transforms()
+            properties = dict(self.ICEBERG_TABLE_PROPERTIES)
+            if transforms:
+                # a partitioned table shuffles rows to their partitions on
+                # (Spark) write, matching the other creation paths
+                properties["write.distribution-mode"] = "hash"
             table = catalog.create_table(
-                identifier, schema=arrow_table.schema, location=create_location
+                identifier,
+                schema=arrow_table.schema,
+                location=create_location,
+                properties=properties,
             )
             # Apply the feature group's partition spec before the first data
             # commit; without this the catalog table would silently stay
             # unpartitioned.
-            self._apply_pyiceberg_spec(table, self._partition_spec_transforms())
+            self._apply_pyiceberg_spec(table, transforms)
             table.append(arrow_table)
         elif self._append_requested(operation, write_options):
             table = catalog.load_table(identifier)

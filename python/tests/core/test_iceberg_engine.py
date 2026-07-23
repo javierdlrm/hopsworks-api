@@ -583,9 +583,13 @@ class TestIcebergEngine:
         spec_builder.truncate.assert_called_once_with("zip", 4)
         spec_builder.alwaysNull.assert_called_once_with("x")
         spec_builder.identity.assert_called_once_with("cat")
-        # a partitioned table shuffles rows to their partitions on write
+        # a partitioned table shuffles rows to their partitions on write;
+        # vectorization is disabled on every new table (FSTORE-2067 workaround)
         properties = jvm.java.util.HashMap.return_value
-        properties.put.assert_called_once_with("write.distribution-mode", "hash")
+        assert properties.put.call_args_list == [
+            mock.call("read.parquet.vectorization.enabled", "false"),
+            mock.call("write.distribution-mode", "hash"),
+        ]
         # HadoopTables.create(schema, spec, properties, location)
         tables = jvm.org.apache.iceberg.hadoop.HadoopTables.return_value
         create_args = tables.create.call_args.args
@@ -604,8 +608,11 @@ class TestIcebergEngine:
         # Act
         iceberg_engine._create_iceberg_table(mocker.MagicMock(), "hopsfs://nn/p")
 
-        # Assert
-        jvm.java.util.HashMap.return_value.put.assert_not_called()
+        # Assert: no distribution mode, only the always-on vectorization
+        # workaround (FSTORE-2067)
+        jvm.java.util.HashMap.return_value.put.assert_called_once_with(
+            "read.parquet.vectorization.enabled", "false"
+        )
 
     def test_optimize_requires_classic_spark(self, mocker):
         # Arrange
@@ -1352,6 +1359,8 @@ class TestIcebergCatalogWrites:
         assert "PARTITIONED BY" not in create_ddl
         dataset.writeTo.assert_called_once_with("prod.fs.fg_1")
         dataset.writeTo.return_value.append.assert_called_once_with()
+        # tables are created with vectorization disabled (FSTORE-2067 workaround)
+        assert "'read.parquet.vectorization.enabled'='false'" in create_ddl
 
     def test_create_iceberg_table_catalog_partitioned_ddl(self, mocker):
         # Arrange
@@ -1386,7 +1395,10 @@ class TestIcebergCatalogWrites:
             "PARTITIONED BY (days(ts), bucket(16, pk), truncate(4, zip), cat)"
             in statement
         )
-        assert "TBLPROPERTIES ('write.distribution-mode'='hash')" in statement
+        assert "TBLPROPERTIES (" in statement
+        assert "'write.distribution-mode'='hash'" in statement
+        # tables are created with vectorization disabled (FSTORE-2067 workaround)
+        assert "'read.parquet.vectorization.enabled'='false'" in statement
 
     @pytest.mark.parametrize("expr", ["void(x)", "bucket(16, pk) as shard"])
     def test_create_iceberg_table_catalog_rejects_inexpressible_transforms(
@@ -1494,6 +1506,52 @@ class TestIcebergCatalogWrites:
             )
         catalog.create_namespace.assert_not_called()
         catalog.create_table.assert_not_called()
+
+    @pytest.mark.skipif(not HAS_PYICEBERG, reason="pyiceberg not installed")
+    @pytest.mark.parametrize("partitioned", [False, True])
+    def test_write_pyiceberg_dataset_catalog_create_forwards_properties(
+        self, mocker, partitioned
+    ):
+        # Arrange: the create branch must disable Parquet vectorization
+        # (FSTORE-2067 workaround) and, for a partitioned table, request
+        # hash-distributed writes like the other creation paths
+        import pyarrow as pa
+
+        fg = _make_fg(primary_key=["pk"])
+        iceberg_engine = _make_engine(mocker, fg=fg, spark_session=_NO_SPARK)
+        catalog = mocker.MagicMock()
+        catalog.table_exists.return_value = False
+        mocker.patch("pyiceberg.catalog.load_catalog", return_value=catalog)
+        arrow_table = pa.table({"pk": pa.array([1], type=pa.int64())})
+        mocker.patch.object(
+            iceberg_engine, "_prepare_arrow_table", return_value=arrow_table
+        )
+        transforms = [mocker.Mock()] if partitioned else []
+        mocker.patch.object(
+            iceberg_engine, "_partition_spec_transforms", return_value=transforms
+        )
+        apply_spec_mock = mocker.patch.object(iceberg_engine, "_apply_pyiceberg_spec")
+        mocker.patch.object(iceberg_engine, "_pyiceberg_snapshots", return_value=[])
+        mocker.patch.object(iceberg_engine, "_build_fg_commit")
+
+        # Act
+        iceberg_engine._write_pyiceberg_dataset(
+            mocker.Mock(),
+            write_options={"iceberg.catalog": "prod"},
+            operation="upsert",
+        )
+
+        # Assert
+        expected_properties = {"read.parquet.vectorization.enabled": "false"}
+        if partitioned:
+            expected_properties["write.distribution-mode"] = "hash"
+        assert catalog.create_table.call_args.kwargs["properties"] == (
+            expected_properties
+        )
+        apply_spec_mock.assert_called_once_with(
+            catalog.create_table.return_value, transforms
+        )
+        catalog.create_table.return_value.append.assert_called_once_with(arrow_table)
 
 
 class TestIcebergArrowFlight:
