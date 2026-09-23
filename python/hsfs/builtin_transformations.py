@@ -28,9 +28,19 @@ from hsfs.transformation_statistics import TransformationStatistics
 
 feature_statistics = TransformationStatistics("feature")
 
+# Every built-in declares its properties (see `udf`): the parameter provenance `P`
+# (`theta_T` when it needs training-dataset statistics), the window dependence `W`
+# (all are point transformations), the information loss `L` (`inj` when the input
+# can be recovered from the output and the parameters, `lossy` otherwise) and
+# determinism. Consumer scope and input timing follow from the attachment.
+
 
 @public
-@udf(float, drop=["feature"])
+@udf(
+    float,
+    drop=["feature"],
+    properties={"P": ["theta_T"], "W": "point", "L": "inj", "deterministic": True},
+)
 def min_max_scaler(
     feature: pd.Series, statistics: TransformationStatistics = feature_statistics
 ) -> pd.Series:
@@ -42,7 +52,11 @@ def min_max_scaler(
 
 
 @public
-@udf(float, drop=["feature"])
+@udf(
+    float,
+    drop=["feature"],
+    properties={"P": ["theta_T"], "W": "point", "L": "inj", "deterministic": True},
+)
 def standard_scaler(
     feature: pd.Series, statistics: TransformationStatistics = feature_statistics
 ) -> pd.Series:
@@ -56,7 +70,12 @@ def standard_scaler(
 
 
 @public
-@udf(float, drop=["feature"], mode="pandas")
+@udf(
+    float,
+    drop=["feature"],
+    mode="pandas",
+    properties={"P": ["theta_T"], "W": "point", "L": "inj", "deterministic": True},
+)
 def robust_scaler(
     feature: pd.Series, statistics: TransformationStatistics = feature_statistics
 ) -> pd.Series:
@@ -91,7 +110,12 @@ def robust_scaler(
 
 
 @public
-@udf(int, drop=["feature"], mode="pandas")
+@udf(
+    int,
+    drop=["feature"],
+    mode="pandas",
+    properties={"P": ["theta_T"], "W": "point", "L": "inj", "deterministic": True},
+)
 def label_encoder(
     feature: pd.Series, statistics: TransformationStatistics = feature_statistics
 ) -> pd.Series:
@@ -109,7 +133,12 @@ def label_encoder(
 
 
 @public
-@udf(bool, drop=["feature"], mode="pandas")
+@udf(
+    bool,
+    drop=["feature"],
+    mode="pandas",
+    properties={"P": ["theta_T"], "W": "point", "L": "inj", "deterministic": True},
+)
 def one_hot_encoder(
     feature: pd.Series, statistics: TransformationStatistics = feature_statistics
 ) -> pd.Series:
@@ -139,7 +168,12 @@ def one_hot_encoder(
 
 
 @public
-@udf(float, drop=["feature"], mode="pandas")
+@udf(
+    float,
+    drop=["feature"],
+    mode="pandas",
+    properties={"P": [], "W": "point", "L": "inj", "deterministic": True},
+)
 def log_transform(feature: pd.Series) -> pd.Series:
     """Apply natural logarithm to a numeric feature.
 
@@ -161,7 +195,12 @@ def log_transform(feature: pd.Series) -> pd.Series:
 
 
 @public
-@udf(int, drop=["feature"], mode="pandas")
+@udf(
+    int,
+    drop=["feature"],
+    mode="pandas",
+    properties={"P": ["theta_T"], "W": "point", "L": "lossy", "deterministic": True},
+)
 def equal_width_binner(
     feature: pd.Series,
     statistics: TransformationStatistics = feature_statistics,
@@ -221,7 +260,12 @@ def equal_width_binner(
 
 
 @public
-@udf(int, drop=["feature"], mode="pandas")
+@udf(
+    int,
+    drop=["feature"],
+    mode="pandas",
+    properties={"P": ["theta_T"], "W": "point", "L": "lossy", "deterministic": True},
+)
 def equal_frequency_binner(
     feature: pd.Series, statistics: TransformationStatistics = feature_statistics
 ) -> pd.Series:
@@ -282,7 +326,12 @@ def equal_frequency_binner(
 
 
 @public
-@udf(int, drop=["feature"], mode="pandas")
+@udf(
+    int,
+    drop=["feature"],
+    mode="pandas",
+    properties={"P": ["theta_T"], "W": "point", "L": "lossy", "deterministic": True},
+)
 def quantile_binner(
     feature: pd.Series, statistics: TransformationStatistics = feature_statistics
 ) -> pd.Series:
@@ -344,7 +393,12 @@ def quantile_binner(
 
 
 @public
-@udf(float, drop=["feature"], mode="pandas")
+@udf(
+    float,
+    drop=["feature"],
+    mode="pandas",
+    properties={"P": ["theta_T"], "W": "point", "L": "inj", "deterministic": True},
+)
 def quantile_transformer(
     feature: pd.Series, statistics: TransformationStatistics = feature_statistics
 ) -> pd.Series:
@@ -395,7 +449,12 @@ def quantile_transformer(
 
 
 @public
-@udf(float, drop=["feature"], mode="pandas")
+@udf(
+    float,
+    drop=["feature"],
+    mode="pandas",
+    properties={"P": ["theta_T"], "W": "point", "L": "lossy", "deterministic": True},
+)
 def rank_normalizer(
     feature: pd.Series, statistics: TransformationStatistics = feature_statistics
 ) -> pd.Series:
@@ -438,7 +497,12 @@ def rank_normalizer(
 
 
 @public
-@udf(float, drop=["feature"], mode="pandas")
+@udf(
+    float,
+    drop=["feature"],
+    mode="pandas",
+    properties={"P": ["theta_T"], "W": "point", "L": "lossy", "deterministic": True},
+)
 def winsorize(
     feature: pd.Series,
     statistics: TransformationStatistics = feature_statistics,
@@ -495,7 +559,12 @@ def winsorize(
 
 
 @public
-@udf(str, drop=["feature"], mode="pandas")
+@udf(
+    str,
+    drop=["feature"],
+    mode="pandas",
+    properties={"P": ["theta_T"], "W": "point", "L": "lossy", "deterministic": True},
+)
 def top_k_categorical_binner(
     feature: pd.Series,
     statistics: TransformationStatistics = feature_statistics,
@@ -561,7 +630,12 @@ def top_k_categorical_binner(
 
 
 @public
-@udf(float, drop=["feature"], mode="pandas")
+@udf(
+    float,
+    drop=["feature"],
+    mode="pandas",
+    properties={"P": ["theta_T"], "W": "point", "L": "lossy", "deterministic": True},
+)
 def impute_mean(
     feature: pd.Series, statistics: TransformationStatistics = feature_statistics
 ) -> pd.Series:
@@ -582,7 +656,12 @@ def impute_mean(
 
 
 @public
-@udf(float, drop=["feature"], mode="pandas")
+@udf(
+    float,
+    drop=["feature"],
+    mode="pandas",
+    properties={"P": ["theta_T"], "W": "point", "L": "lossy", "deterministic": True},
+)
 def impute_median(
     feature: pd.Series, statistics: TransformationStatistics = feature_statistics
 ) -> pd.Series:
@@ -604,7 +683,12 @@ def impute_median(
 
 
 @public
-@udf(float, drop=["feature"], mode="pandas")
+@udf(
+    float,
+    drop=["feature"],
+    mode="pandas",
+    properties={"P": [], "W": "point", "L": "lossy", "deterministic": True},
+)
 def impute_constant(
     feature: pd.Series,
     context: dict | None = None,
@@ -634,7 +718,12 @@ def impute_constant(
 
 
 @public
-@udf(str, drop=["feature"], mode="pandas")
+@udf(
+    str,
+    drop=["feature"],
+    mode="pandas",
+    properties={"P": ["theta_T"], "W": "point", "L": "lossy", "deterministic": True},
+)
 def impute_mode(
     feature: pd.Series, statistics: TransformationStatistics = feature_statistics
 ) -> pd.Series:
@@ -660,7 +749,12 @@ def impute_mode(
 
 
 @public
-@udf(str, drop=["feature"], mode="pandas")
+@udf(
+    str,
+    drop=["feature"],
+    mode="pandas",
+    properties={"P": [], "W": "point", "L": "lossy", "deterministic": True},
+)
 def impute_category(
     feature: pd.Series,
     context: dict | None = None,
