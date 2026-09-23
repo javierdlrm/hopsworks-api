@@ -1744,3 +1744,76 @@ class TestUdfSourceExtraction:
         )
         # The real symptom: the imports block on its own must compile.
         compile(module_imports + "\nimport pandas as pd\n", "<test>", "exec")
+
+
+class TestHopsworksUdfProperties:
+    def test_properties_are_stored_and_normalised(self):
+        @udf(
+            float,
+            properties={
+                "P": ["theta_X", "theta_T"],
+                "W": "point",
+                "L": "inj",
+                "deterministic": True,
+                "theta_X": [{"kind": "url", "ref": "https://fx.example/rates"}],
+            },
+        )
+        def convert(amount):
+            return amount
+
+        assert convert.properties == {
+            "P": ["theta_T", "theta_X"],
+            "W": "point",
+            "L": "inj",
+            "deterministic": True,
+            "theta_X": [{"kind": "url", "ref": "https://fx.example/rates"}],
+        }
+
+    def test_properties_default_to_none(self):
+        @udf(int)
+        def plain(feature):
+            return feature
+
+        assert plain.properties is None
+
+    @pytest.mark.parametrize(
+        "properties, message",
+        [
+            ({"W": "hourly"}, "Property W"),
+            ({"L": "none"}, "Property L"),
+            ({"P": ["theta_Z"]}, "Property P"),
+            ({"deterministic": "yes"}, "must be a boolean"),
+            ({"theta_X": ["fx"]}, "Property theta_X"),
+            ({"colour": "blue"}, "Unknown transformation properties"),
+        ],
+    )
+    def test_invalid_properties_are_rejected(self, properties, message):
+        with pytest.raises(ValueError, match=message):
+
+            @udf(int, properties=properties)
+            def bad(feature):
+                return feature
+
+    def test_properties_round_trip_through_json(self):
+        @udf(
+            float,
+            properties={
+                "P": ["theta_T"],
+                "W": "point",
+                "L": "lossy",
+                "deterministic": True,
+            },
+        )
+        def scale(feature):
+            return feature
+
+        serialised = scale.to_dict()
+        assert serialised["properties"] == (
+            '{"P": ["theta_T"], "W": "point", "L": "lossy", "deterministic": true}'
+        )
+
+        restored = HopsworksUdf.from_response_json(serialised)
+        assert restored.properties == scale.properties
+
+        serialised["properties"] = None
+        assert HopsworksUdf.from_response_json(serialised).properties is None

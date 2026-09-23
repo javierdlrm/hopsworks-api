@@ -85,6 +85,7 @@ def udf(
     return_type: list[type] | type,
     drop: str | list[str] | None = None,
     mode: Literal["default", "python", "pandas"] = "default",
+    properties: dict[str, Any] | None = None,
 ) -> HopsworksUdf:
     """Create an User Defined Function that can be and used within the Hopsworks Feature Store to create transformation functions.
 
@@ -101,12 +102,24 @@ def udf(
         @udf(float)
         def add_one(data1):
             return data1 + 1
+
+        # declare how the transformation behaves, for observability
+        @udf(float, properties={"P": ["theta_T"], "W": "point", "L": "inj", "deterministic": True})
+        def scale(data1, statistics=feature_statistics):
+            return (data1 - statistics.data1.mean) / statistics.data1.std_dev
         ```
 
     Parameters:
         return_type: The output types of the defined UDF.
         drop: The features to be dropped after application of transformation functions.
         mode: The exection mode of the UDF.
+        properties: The declared properties of the transformation, stored with it in the feature store.
+            `P` is the parameter provenance, a list drawn from `"theta_T"` (fitted on the training data), `"theta_A"` (an artifact) and `"theta_X"` (external state read at execution).
+            `W` is the window dependence, `"point"` or `"win"`.
+            `L` is the information loss, `"inj"` (invertible) or `"lossy"`.
+            `deterministic` says whether the same inputs and parameters always give the same output.
+            `theta_X` lists the external states read, as `{"kind": "fg" | "url", "ref": ...}` objects, and `joint_test` marks a declared joint-input test.
+            Consumer scope and input timing are not declared: they follow from where the function is attached.
 
     Returns:
         The metadata object for hopsworks UDF's.
@@ -121,9 +134,65 @@ def udf(
             return_types=return_type,
             dropped_argument_names=drop,
             execution_mode=UDFExecutionMode.from_string(mode),
+            properties=properties,
         )
 
     return wrapper
+
+
+_PROPERTY_KEYS = {"P", "W", "L", "deterministic", "theta_X", "joint_test"}
+_PARAMETER_PROVENANCE = {"theta_T", "theta_A", "theta_X"}
+_WINDOW_DEPENDENCE = {"point", "win"}
+_INFORMATION_LOSS = {"inj", "lossy"}
+
+
+def _validate_properties(properties: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Check a declared property vector and return it as a plain dictionary.
+
+    The backend stores the declaration as an opaque JSON object; the values are checked here, where the vocabulary lives.
+    """
+    if properties is None:
+        return None
+    if not isinstance(properties, dict):
+        raise ValueError("properties must be a dictionary.")
+    unknown = set(properties) - _PROPERTY_KEYS
+    if unknown:
+        raise ValueError(
+            f"Unknown transformation properties {sorted(unknown)}; allowed keys are {sorted(_PROPERTY_KEYS)}."
+        )
+    if "P" in properties:
+        provenance = properties["P"]
+        if (
+            not isinstance(provenance, (list, tuple, set))
+            or not set(provenance) <= _PARAMETER_PROVENANCE
+        ):
+            raise ValueError(
+                f"Property P must be a list drawn from {sorted(_PARAMETER_PROVENANCE)}, not {provenance!r}."
+            )
+        properties = {**properties, "P": sorted(set(provenance))}
+    if "W" in properties and properties["W"] not in _WINDOW_DEPENDENCE:
+        raise ValueError(
+            f"Property W must be one of {sorted(_WINDOW_DEPENDENCE)}, not {properties['W']!r}."
+        )
+    if "L" in properties and properties["L"] not in _INFORMATION_LOSS:
+        raise ValueError(
+            f"Property L must be one of {sorted(_INFORMATION_LOSS)}, not {properties['L']!r}."
+        )
+    for flag in ("deterministic", "joint_test"):
+        if flag in properties and not isinstance(properties[flag], bool):
+            raise ValueError(
+                f"Property {flag} must be a boolean, not {properties[flag]!r}."
+            )
+    if "theta_X" in properties:
+        declarations = properties["theta_X"]
+        if not isinstance(declarations, list) or not all(
+            isinstance(d, dict) and "kind" in d and "ref" in d for d in declarations
+        ):
+            raise ValueError(
+                'Property theta_X must be a list of {"kind": ..., "ref": ...} objects.'
+            )
+    json.dumps(properties)  # must be JSON serialisable, the backend stores it as such
+    return dict(properties)
 
 
 @public
@@ -167,6 +236,7 @@ class HopsworksUdf:
         feature_name_prefix: Prefixes if any used in the feature view.
         output_column_names: The names of the output columns returned from the transformation function.
         generate_output_col_names: Generate default output column names for the transformation function.
+        properties: The declared properties of the transformation, see [`udf`][hsfs.hopsworks_udf.udf].
     """
 
     # Mapping for converting python types to spark types - required for creating pandas UDF's.
@@ -193,7 +263,9 @@ class HopsworksUdf:
         feature_name_prefix: str | None = None,
         output_column_names: str | None = None,
         generate_output_col_names: bool = True,
+        properties: dict[str, Any] | None = None,
     ):
+        self._properties: dict[str, Any] | None = _validate_properties(properties)
         self._return_types: list[str] = HopsworksUdf._validate_and_convert_output_types(
             return_types
         )
@@ -1301,10 +1373,15 @@ def renaming_wrapper(*args):
             "featureNamePrefix": self._feature_name_prefix,
             "executionMode": self.execution_mode.value.upper(),
             **(
-                {"outputColumnNames": self.output_column_names}
+                {
+                    "outputColumnNames": self.output_column_names,
+                    "properties": json.dumps(self._properties)
+                    if self._properties is not None
+                    else None,
+                }
                 if Version(backend_version) >= Version("4.1.6")
                 else {}
-            ),  # This check is added for backward compatibility with older versions of Hopsworks. The "outputColumnNames" field was added in Hopsworks 4.1.6 and versions below do not support unknown fields in the backend.
+            ),  # This check is added for backward compatibility with older versions of Hopsworks. The "outputColumnNames" field was added in Hopsworks 4.1.6 and versions below do not support unknown fields in the backend; "properties" rides along under the same guard.
         }
 
     @public
@@ -1404,6 +1481,10 @@ def renaming_wrapper(*args):
                 for arg_index in range(len(arg_list))
             ]
 
+        properties = json_decamelized.get("properties")
+        if isinstance(properties, str):
+            properties = json.loads(properties)
+
         hopsworks_udf: HopsworksUdf = cls(
             func=function_source_code,
             return_types=output_types,
@@ -1418,6 +1499,7 @@ def renaming_wrapper(*args):
             ),
             output_column_names=output_column_names,
             generate_output_col_names=not output_column_names,  # Do not generate output column names if they are retrieved from the back
+            properties=properties,
         )
 
         # Set transformation features if already set.
@@ -1553,6 +1635,12 @@ def renaming_wrapper(*args):
     @property
     def execution_mode(self) -> UDFExecutionMode:
         return self._execution_mode
+
+    @public
+    @property
+    def properties(self) -> dict[str, Any] | None:
+        """The declared properties of the transformation (`P`, `W`, `L`, `deterministic`, `theta_X`, `joint_test`), or `None` when nothing was declared."""
+        return self._properties
 
     @public
     @property

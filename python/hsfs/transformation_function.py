@@ -603,6 +603,50 @@ class TransformationFunction:
         """Type of the Transformation: can be `model dependent` or `on-demand`."""
         return self._transformation_type
 
+    @public
+    @property
+    def properties(self) -> dict[str, Any] | None:
+        """The properties declared on the UDF with `@udf(..., properties=...)`, or `None`."""
+        return self.__hopsworks_udf.properties
+
+    @public
+    def property_vector(
+        self, request_parameters: list[str] | None = None
+    ) -> dict[str, Any]:
+        """The property vector of this transformation as attached.
+
+        The declared part (`P`, `W`, `L`, `deterministic`) comes from the UDF's properties.
+        The consumer scope `S` follows from the attachment: an on-demand function on a feature group is `"shared"`, a model-dependent function on a feature view is `"scoped"`.
+        The input timing `E` is `"req"` when the function reads a request parameter, `"mat"` otherwise.
+        `unverified` is `True` when `P` or `L` was not declared.
+
+        Parameters:
+            request_parameters: Names of the request parameters of the feature view or feature group the function is attached to.
+
+        Returns:
+            A dictionary with the keys `S`, `P`, `E`, `W`, `L`, `deterministic`, `theta_X`, `joint_test` and `unverified`.
+        """
+        declared = self.__hopsworks_udf.properties or {}
+        if self.transformation_type == TransformationType.ON_DEMAND:
+            scope = "shared"
+        elif self.transformation_type == TransformationType.MODEL_DEPENDENT:
+            scope = "scoped"
+        else:
+            scope = None
+        inputs = set(self.__hopsworks_udf.transformation_features or [])
+        timing = "req" if inputs & set(request_parameters or []) else "mat"
+        return {
+            "S": scope,
+            "P": list(declared.get("P", [])),
+            "E": timing,
+            "W": declared.get("W"),
+            "L": declared.get("L"),
+            "deterministic": declared.get("deterministic"),
+            "theta_X": list(declared.get("theta_X", [])),
+            "joint_test": bool(declared.get("joint_test", False)),
+            "unverified": "P" not in declared or "L" not in declared,
+        }
+
     @transformation_type.setter
     def transformation_type(self, transformation_type) -> None:
         self._transformation_type = transformation_type

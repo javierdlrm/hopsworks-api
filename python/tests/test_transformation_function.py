@@ -1160,3 +1160,75 @@ class TestTransformationFunction:
         second = tf.hopsworks_udf._get_udf(online=False)
         with pytest.raises(KeyError):
             second(pd.Series([1, 2, 3]))
+
+
+class TestTransformationFunctionPropertyVector:
+    def _function(self, transformation_type, properties=None):
+        @udf(float, properties=properties)
+        def haversine(req_lat, ctx_lat):
+            return req_lat - ctx_lat
+
+        return TransformationFunction(
+            featurestore_id=10,
+            hopsworks_udf=haversine,
+            version=2,
+            transformation_type=transformation_type,
+        )
+
+    def test_on_demand_function_reading_a_request_parameter(self):
+        tf = self._function(
+            TransformationType.ON_DEMAND,
+            {"P": [], "W": "point", "L": "lossy", "deterministic": True},
+        )
+
+        vector = tf.property_vector(request_parameters=["req_lat"])
+
+        assert vector == {
+            "S": "shared",
+            "P": [],
+            "E": "req",
+            "W": "point",
+            "L": "lossy",
+            "deterministic": True,
+            "theta_X": [],
+            "joint_test": False,
+            "unverified": False,
+        }
+        assert tf.properties == {
+            "P": [],
+            "W": "point",
+            "L": "lossy",
+            "deterministic": True,
+        }
+
+    def test_model_dependent_function_without_declaration_is_unverified(self):
+        tf = self._function(TransformationType.MODEL_DEPENDENT)
+
+        vector = tf.property_vector()
+
+        assert vector["S"] == "scoped"
+        assert vector["E"] == "mat"
+        assert vector["P"] == []
+        assert vector["W"] is None
+        assert vector["unverified"] is True
+        assert tf.properties is None
+
+    def test_builtin_transformations_declare_their_properties(self):
+        from hsfs import builtin_transformations as bt
+
+        for name in (
+            "min_max_scaler",
+            "standard_scaler",
+            "label_encoder",
+            "one_hot_encoder",
+            "log_transform",
+            "equal_width_binner",
+            "impute_mean",
+        ):
+            declared = getattr(bt, name).properties
+            assert set(declared) == {"P", "W", "L", "deterministic"}, name
+            assert declared["W"] == "point" and declared["deterministic"] is True, name
+        assert bt.standard_scaler.properties["P"] == ["theta_T"]
+        assert bt.standard_scaler.properties["L"] == "inj"
+        assert bt.log_transform.properties["P"] == []
+        assert bt.equal_width_binner.properties["L"] == "lossy"
