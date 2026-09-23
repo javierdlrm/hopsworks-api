@@ -221,6 +221,21 @@ def _int_or_none(value):
         return None
 
 
+def _serving_revision(deployment) -> str | None:
+    """The identity of the serving code that handles a request.
+
+    The pod exposes the deployment's revision as `SERVING_REVISION` (a new value on every start and update); without it the deployment name and version identify the rollout.
+    """
+    revision = os.environ.get("SERVING_REVISION")
+    if revision:
+        return revision
+    name = os.environ.get("DEPLOYMENT_NAME") or getattr(deployment, "name", None)
+    version = os.environ.get("DEPLOYMENT_VERSION")
+    if name and version:
+        return f"{name}:{version}"
+    return None
+
+
 def _take(values, start: int, stop: int):
     if values is None:
         return None
@@ -1338,6 +1353,7 @@ class DefaultPredict:
             return None
         deployment_name = os.environ.get("DEPLOYMENT_NAME", self.deployment.name)
         deployment_version = os.environ.get("DEPLOYMENT_VERSION")
+        serving_revision = _serving_revision(self.deployment)
         values = []
         # `start` is the offset of a slice within its request, so request_row
         # keeps counting from the request's first row.
@@ -1354,6 +1370,8 @@ class DefaultPredict:
                     entry[name] = self.schema.schema_id
                 elif name == "request_row":
                     entry[name] = index
+                elif name == "serving_revision":
+                    entry[name] = serving_revision
             values.append(entry)
         return values
 

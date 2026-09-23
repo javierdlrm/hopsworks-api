@@ -413,3 +413,55 @@ if __name__ == "__main__":
         (destination / (name + ".json")).write_text(
             json.dumps(fixture, indent=2) + "\n"
         )
+
+
+def test_serving_revision_rides_the_batch_as_a_client_column():
+    """The sidecar has no event header for the serving revision, so the batch carries it."""
+    features = [
+        SimpleNamespace(name="amount", type="double"),
+        SimpleNamespace(name="deployment_name", type="string"),
+        SimpleNamespace(name="serving_revision", type="string"),
+    ]
+    fv = SimpleNamespace(
+        feature_logging=SimpleNamespace(
+            untransformed_features=SimpleNamespace(columns=features),
+            transformed_features=None,
+            extra_logging_columns=features[1:],
+        ),
+        _get_transformed_feature_names=lambda td: [],
+        _get_untransformed_feature_names=lambda td: ["amount"],
+        _get_label_column_names=lambda td: [],
+        _required_serving_key_names=[],
+        inference_helper_columns=[],
+        request_parameters=[],
+        _root_feature_group_event_time_column_name=None,
+    )
+
+    builder = _ArrowBatchBuilder(fv, 3)
+
+    assert "serving_revision" in builder._types
+    assert "deployment_name" not in builder._types  # filled from the event headers
+
+
+def test_serving_revision_must_be_a_string_column():
+    features = [
+        SimpleNamespace(name="amount", type="double"),
+        SimpleNamespace(name="serving_revision", type="int"),
+    ]
+    fv = SimpleNamespace(
+        feature_logging=SimpleNamespace(
+            untransformed_features=SimpleNamespace(columns=features),
+            transformed_features=None,
+            extra_logging_columns=features[1:],
+        ),
+        _get_transformed_feature_names=lambda td: [],
+        _get_untransformed_feature_names=lambda td: ["amount"],
+        _get_label_column_names=lambda td: [],
+        _required_serving_key_names=[],
+        inference_helper_columns=[],
+        request_parameters=[],
+        _root_feature_group_event_time_column_name=None,
+    )
+
+    with pytest.raises(ValueError, match="reserved logging column type"):
+        _ArrowBatchBuilder(fv, 3)

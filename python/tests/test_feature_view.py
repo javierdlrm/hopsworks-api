@@ -2483,3 +2483,24 @@ class TestRecreateTrainingDataset:
         fv.recreate_training_dataset(training_dataset_version=3, spine_df=frame)
 
         assert engine._recreate_training_dataset.call_args.kwargs["spine_df"] is frame
+
+
+class TestFeatureViewAppliedCodeVersions:
+    def test_applied_code_versions_cover_every_attached_function(
+        self, mocker, backend_fixtures
+    ):
+        mocker.patch("hopsworks_common.client._get_instance")
+        json = backend_fixtures["feature_view"]["get_transformations"]["response"]
+        fv = feature_view.FeatureView.from_response_json(json)
+
+        applied = fv.applied_code_versions()
+
+        attached = list(fv.transformation_functions or []) + list(
+            fv._on_demand_transformation_functions or []
+        )
+        assert attached, "the fixture attaches transformation functions"
+        assert applied == {
+            tf.hopsworks_udf.function_name: tf.code_version for tf in attached
+        }
+        for name, identity in applied.items():
+            assert identity.startswith(f"{name}@v")

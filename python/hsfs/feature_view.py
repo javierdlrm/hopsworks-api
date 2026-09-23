@@ -5461,6 +5461,7 @@ class FeatureView:
         extra_log_columns: Feature | dict[str, str] = None,
         materialization_interval: str | None = None,
         transport: str | None = None,
+        log_serving_revision: bool = True,
     ) -> None:
         """Enable feature logging for the current feature view.
 
@@ -5474,6 +5475,8 @@ class FeatureView:
                 `None` keeps the platform default.
                 Change it later with [`FeatureView.set_log_materialization_interval`][hsfs.feature_view.FeatureView.set_log_materialization_interval].
             transport: `"realtime"` or `"job"`; `None` keeps the platform default.
+            log_serving_revision: Declare the extra column `serving_revision`, which the default predictor fills with the identity of the serving code that produced each row (the deployment's revision, or `<deployment>:<version>`).
+                A custom predictor passes the value through `extra_logging_features`.
 
         Example: Enable feature logging
             ```python
@@ -5505,7 +5508,11 @@ class FeatureView:
             hopsworks.client.exceptions.FeatureStoreException: If the view already logs through the other transport.
         """
         fv = self._feature_view_engine._enable_feature_logging(
-            self, extra_log_columns, materialization_interval, transport
+            self,
+            extra_log_columns,
+            materialization_interval,
+            transport,
+            log_serving_revision=log_serving_revision,
         )
         self._feature_logging = self._feature_view_engine._get_feature_logging(fv)
         return fv
@@ -6449,6 +6456,22 @@ class FeatureView:
     ) -> list[TransformationFunction]:
         """Get transformation functions."""
         return self._transformation_functions
+
+    @public
+    def applied_code_versions(self) -> dict[str, str]:
+        """The code identity of every transformation this feature view applies.
+
+        Transformation functions are fixed per feature view version, so the identity of the code applied to a logged row is the identity of the functions attached to the version whose logging group holds the row; the code outside the feature view is the row's `serving_revision`.
+
+        Returns:
+            A mapping from function name to `name@v<version>:<code_hash>`, over the model-dependent and the on-demand transformation functions.
+        """
+        applied = {}
+        for tf in list(self._transformation_functions or []) + list(
+            self._on_demand_transformation_functions or []
+        ):
+            applied[tf.hopsworks_udf.function_name] = tf.code_version
+        return applied
 
     @transformation_functions.setter
     def transformation_functions(

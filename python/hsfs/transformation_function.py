@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import logging
 from enum import Enum
@@ -608,6 +609,22 @@ class TransformationFunction:
     def properties(self) -> dict[str, Any] | None:
         """The properties declared on the UDF with `@udf(..., properties=...)`, or `None`."""
         return self.__hopsworks_udf.properties
+
+    @public
+    @property
+    def code_hash(self) -> str:
+        """The first eight hex digits of the SHA-256 of the function's source code as stored in the feature store.
+
+        Together with the name and version it identifies the code a transformation applies, as `name@v<version>:<code_hash>`.
+        """
+        source = self.__hopsworks_udf._function_source or ""
+        return hashlib.sha256(source.encode("utf-8")).hexdigest()[:8]
+
+    @public
+    @property
+    def code_version(self) -> str:
+        """The code identity of this transformation, `name@v<version>:<code_hash>`."""
+        return f"{self.__hopsworks_udf.function_name}@v{self._version}:{self.code_hash}"
 
     @public
     def property_vector(

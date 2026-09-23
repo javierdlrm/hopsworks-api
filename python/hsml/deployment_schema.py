@@ -52,6 +52,9 @@ RESERVED_LOGGING_COLUMNS = {
     "deployment_version": "int",
     "deployment_schema_id": "string",
     "request_row": "int",
+    # the identity of the serving code that produced the row: the deployment's revision
+    # (regenerated on every start and update), or "<deployment>:<version>" without one
+    "serving_revision": "string",
 }
 
 OUTPUT_PREDICTIONS = "predictions"
