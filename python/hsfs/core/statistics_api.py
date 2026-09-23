@@ -130,6 +130,9 @@ class StatisticsApi:
         row_percentage: float | None = None,
         before_transformation: bool | None = None,
         training_dataset_version: int | None = None,
+        start_event_time: int | None = None,
+        end_event_time: int | None = None,
+        event_time: str | None = None,
     ) -> list[statistics.Statistics] | None:
         """Get all statistics of an entity.
 
@@ -142,6 +145,9 @@ class StatisticsApi:
             row_percentage: Percentage of feature values used during statistics computation
             before_transformation: Whether the statistics were computed before transformations or not
             training_dataset_version: Version of the training dataset on which statistics were computed
+            start_event_time: Lower bound (inclusive) on the window start, event-time axis
+            end_event_time: Upper bound (inclusive) on the window end, event-time axis
+            event_time: Name of the feature the windows are sliced by
 
         Returns:
             A list of statistics objects, or `None` if not found.
@@ -158,6 +164,9 @@ class StatisticsApi:
             computation_time=computation_time,
             start_commit_time=start_commit_time,
             end_commit_time=end_commit_time,
+            start_event_time=start_event_time,
+            end_event_time=end_event_time,
+            event_time=event_time,
             filter_eq_times=False,
             feature_names=feature_names,
             row_percentage=row_percentage,
@@ -370,15 +379,18 @@ class StatisticsApi:
             filter_name = col_name + ("_eq" if filter_eq_times else "_gtoeq")
             filters.append(filter_name + ":" + str(start_commit_time))
 
-        # event-time lookups are equality only: monitoring registers and reads exact window bounds.
+        # event-time bounds: exact for a single lookup (monitoring registers and reads exact
+        # window bounds), a range when listing, as for the commit-time bounds above.
         if end_event_time is not None:
             col_name = "window_end_event_time"
             sorts.append(col_name + ":desc")
-            filters.append(col_name + "_eq:" + str(end_event_time))
+            filter_name = col_name + ("_eq" if filter_eq_times else "_ltoeq")
+            filters.append(filter_name + ":" + str(end_event_time))
         if start_event_time is not None:
             col_name = "window_start_event_time"
             sorts.append(col_name + ":asc")
-            filters.append(col_name + "_eq:" + str(start_event_time))
+            filter_name = col_name + ("_eq" if filter_eq_times else "_gtoeq")
+            filters.append(filter_name + ":" + str(start_event_time))
         if event_time is not None:
             filters.append("event_time_eq:" + str(event_time))
 

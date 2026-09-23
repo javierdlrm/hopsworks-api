@@ -46,6 +46,7 @@ class Statistics:
         window_start_event_time: int | None = None,
         window_end_event_time: int | None = None,
         event_time: str | None = None,
+        boundary_count: int | None = None,
         # training dataset
         feature_view_name: str | None = None,
         feature_view_version: int | None = None,
@@ -73,6 +74,7 @@ class Statistics:
         self._window_start_event_time = window_start_event_time
         self._window_end_event_time = window_end_event_time
         self._event_time = event_time
+        self._boundary_count = boundary_count
         # training dataset
         self._feature_view_name = feature_view_name
         self._feature_view_version = feature_view_version
@@ -158,6 +160,8 @@ class Statistics:
             _dict["windowEndEventTime"] = self._window_end_event_time
         if self._event_time is not None:
             _dict["eventTime"] = self._event_time
+        if self._boundary_count is not None:
+            _dict["boundaryCount"] = self._boundary_count
         if self._feature_descriptive_statistics is not None:
             _dict["featureDescriptiveStatistics"] = [
                 fds.to_dict() for fds in self._feature_descriptive_statistics
@@ -165,6 +169,12 @@ class Statistics:
         if self._split_statistics is not None:
             _dict["splitStatistics"] = [sps.to_dict() for sps in self._split_statistics]
         return _dict
+
+    @public
+    @property
+    def boundary_count(self) -> int | None:
+        """Rows that reached the feature group's ingestion boundary for this event-time window, or `None` when nobody counted them."""
+        return self._boundary_count
 
     def json(self) -> str:
         return json.dumps(self, cls=util.Encoder)
