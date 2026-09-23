@@ -1232,3 +1232,33 @@ class TestTransformationFunctionPropertyVector:
         assert bt.standard_scaler.properties["L"] == "inj"
         assert bt.log_transform.properties["P"] == []
         assert bt.equal_width_binner.properties["L"] == "lossy"
+
+
+class TestTransformationFunctionCodeIdentity:
+    def test_code_hash_and_code_version(self):
+        @udf(float)
+        def haversine(req_lat, ctx_lat):
+            return req_lat - ctx_lat
+
+        @udf(float)
+        def haversine_bug(req_lat, ctx_lat):
+            return (req_lat - ctx_lat) * 57.3
+
+        tf = TransformationFunction(
+            featurestore_id=10, hopsworks_udf=haversine, version=2
+        )
+        bug = TransformationFunction(
+            featurestore_id=10, hopsworks_udf=haversine_bug, version=3
+        )
+
+        assert len(tf.code_hash) == 8 and int(tf.code_hash, 16) >= 0
+        assert tf.code_version == f"haversine@v2:{tf.code_hash}"
+        assert bug.code_version.startswith("haversine_bug@v3:")
+        assert tf.code_hash != bug.code_hash
+        # the hash is over the stored source, so it is stable across copies
+        assert (
+            TransformationFunction(
+                featurestore_id=10, hopsworks_udf=haversine, version=2
+            ).code_hash
+            == tf.code_hash
+        )

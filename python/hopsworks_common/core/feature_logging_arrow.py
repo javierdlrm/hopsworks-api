@@ -67,6 +67,8 @@ class _ArrowBatchBuilder:
             "deployment_version": "integer",
             "deployment_schema_id": "string",
             "request_row": "integer",
+            # rides the batch like a client column: the sidecar has no event header for it
+            "serving_revision": "string",
         }
         self._types = {}
         for feature in self._features:

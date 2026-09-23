@@ -1540,3 +1540,38 @@ def test_close_leaves_the_commit_job_trigger_behind_at_the_budget(monkeypatch):
     assert predictor.close(timeout=0.05) is True
     assert time.monotonic() - started < 0.3
     assert asked.wait(1)
+
+
+class TestServingRevision:
+    def _predictor(self):
+        fv = FakeFeatureView(
+            logging_enabled=True,
+            extra_columns=("deployment_name", "serving_revision", "channel"),
+        )
+        schema = _schema(extra_logging_features=[{"name": "channel", "type": "string"}])
+        deployment = FakeDeployment(schema, fv, FakeModel(COLUMNAR))
+        return dp.DefaultPredict(deployment, async_logger=object())
+
+    def test_serving_revision_comes_from_the_pod_environment(
+        self, pod_env, monkeypatch
+    ):
+        monkeypatch.setenv("SERVING_REVISION", "a1b2c3d4")
+        predictor = self._predictor()
+
+        assert predictor.reserved_columns == ["deployment_name", "serving_revision"]
+        assert predictor._extra_logging_values([{"channel": "web"}]) == [
+            {"channel": "web", "deployment_name": "dep", "serving_revision": "a1b2c3d4"}
+        ]
+
+    def test_serving_revision_falls_back_to_the_deployment_version(self, pod_env):
+        predictor = self._predictor()
+
+        assert predictor._extra_logging_values([{}]) == [
+            {"channel": None, "deployment_name": "dep", "serving_revision": "dep:4"}
+        ]
+
+    def test_serving_revision_is_null_without_a_version(self, pod_env, monkeypatch):
+        monkeypatch.delenv("DEPLOYMENT_VERSION")
+        predictor = self._predictor()
+
+        assert predictor._extra_logging_values([{}])[0]["serving_revision"] is None
