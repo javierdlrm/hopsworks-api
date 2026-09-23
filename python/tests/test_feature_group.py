@@ -14,6 +14,7 @@
 #   limitations under the License.
 #
 import warnings
+from datetime import timedelta
 from unittest import mock
 
 import hsfs
@@ -2871,3 +2872,88 @@ class TestIsSparkDataFrame:
         session = spark_engine_mod.Engine()._spark_session
         sdf = session.createDataFrame([(1,)], ["a"])
         assert hasattr(sdf, "drop_duplicates") and hasattr(sdf, "distinct")
+
+
+class TestFeatureGroupAllowedLateness:
+    def _fg(self, backend_fixtures, **extra):
+        json = dict(backend_fixtures["feature_group"]["get"]["response"])
+        json.update(extra)
+        return feature_group.FeatureGroup.from_response_json(json)
+
+    def test_allowed_lateness_round_trips(self, backend_fixtures):
+        fg = self._fg(backend_fixtures, allowedLatenessSecs=1200)
+
+        assert fg.allowed_lateness == 1200
+        assert fg.to_dict()["allowedLatenessSecs"] == 1200
+
+    def test_allowed_lateness_defaults_to_none_and_accepts_timedelta(
+        self, backend_fixtures
+    ):
+        fg = self._fg(backend_fixtures)
+
+        assert fg.allowed_lateness is None
+        assert fg.to_dict()["allowedLatenessSecs"] is None
+        fg.allowed_lateness = timedelta(minutes=20)
+        assert fg.allowed_lateness == 1200
+
+    def test_update_allowed_lateness_goes_through_the_engine(
+        self, mocker, backend_fixtures
+    ):
+        fg = self._fg(backend_fixtures)
+        update = mocker.patch.object(
+            fg._feature_group_engine, "_update_allowed_lateness"
+        )
+
+        fg.update_allowed_lateness(timedelta(minutes=20))
+
+        update.assert_called_once_with(fg, 1200)
+        assert fg.allowed_lateness == 1200
+
+    def test_record_and_get_boundary_counts_use_the_event_time_feature(
+        self, mocker, backend_fixtures
+    ):
+        fg = self._fg(backend_fixtures, eventTime="event_ts", allowedLatenessSecs=1200)
+        record = mocker.patch.object(fg._statistics_engine, "_record_boundary_counts")
+        get = mocker.patch.object(
+            fg._statistics_engine,
+            "_get_boundary_counts",
+            return_value={
+                (1704067200000, 1704070800000): 3600,
+                (1704070800000, 1704074400000): 12,
+            },
+        )
+
+        fg.record_boundary_counts(
+            {("2024-01-01 00:00:00", "2024-01-01 01:00:00"): 3600}, accumulate=True
+        )
+        counts = fg.get_boundary_counts(start_event_time="2024-01-01 00:00:00")
+
+        record.assert_called_once_with(
+            fg,
+            {(1704067200000, 1704070800000): 3600},
+            event_time="event_ts",
+            accumulate=True,
+        )
+        assert get.call_args.kwargs == {
+            "start_event_time": 1704067200000,
+            "end_event_time": None,
+            "event_time": "event_ts",
+        }
+        assert counts[(1704070800000, 1704074400000)] == 12
+        # the watermark is the latest counted window end minus the allowed lateness
+        assert fg.watermark() == 1704074400000 - 1200 * 1000
+
+    def test_boundary_counts_need_an_event_time(self, backend_fixtures):
+        fg = self._fg(backend_fixtures, eventTime=None)
+
+        with pytest.raises(ValueError, match="event-time feature"):
+            fg.record_boundary_counts({(0, 1): 1})
+
+    def test_watermark_without_counts(self, mocker, backend_fixtures):
+        fg = self._fg(backend_fixtures, eventTime="event_ts")
+        mocker.patch.object(
+            fg._statistics_engine, "_get_boundary_counts", return_value={}
+        )
+
+        assert fg.watermark() is None
+

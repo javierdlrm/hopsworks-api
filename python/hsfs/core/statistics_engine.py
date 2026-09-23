@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 import warnings
 from datetime import date, datetime
 from typing import TYPE_CHECKING, TypeVar
@@ -650,6 +651,87 @@ class StatisticsEngine:
 
         stats["columns"] = list(stats_dict.values())
         return json.dumps(stats)  # the result is a JSON string
+
+    def _record_boundary_counts(
+        self,
+        feature_group,
+        counts: dict[tuple[int, int], int],
+        event_time: str,
+        accumulate: bool = False,
+    ) -> None:
+        """Register the number of rows that reached the ingestion boundary per event-time window.
+
+        Each window is a half-open `[start, end)` in milliseconds; the count lands on the statistics row of that window (created when absent) and can be read back with `_get_boundary_counts`.
+
+        Parameters:
+            feature_group: The feature group the rows were ingested into.
+            counts: Row count per `(start, end)` window.
+            event_time: Name of the event-time feature the windows are sliced by.
+            accumulate: Add to the count already recorded for a window instead of replacing it.
+        """
+        for (start, end), count in counts.items():
+            if accumulate:
+                count += self._get_boundary_counts(
+                    feature_group, start, end, event_time, exact=True
+                ).get((start, end), 0)
+            self._statistics_api._post(
+                feature_group,
+                stats=statistics.Statistics(
+                    computation_time=int(time.time() * 1000),
+                    row_percentage=1.0,
+                    feature_descriptive_statistics=[],
+                    window_start_event_time=start,
+                    window_end_event_time=end,
+                    event_time=event_time,
+                    boundary_count=int(count),
+                ),
+                training_dataset_version=None,
+            )
+
+    def _get_boundary_counts(
+        self,
+        feature_group,
+        start_event_time: int | None = None,
+        end_event_time: int | None = None,
+        event_time: str | None = None,
+        exact: bool = False,
+    ) -> dict[tuple[int, int], int]:
+        """Read the boundary counts recorded per event-time window.
+
+        Parameters:
+            feature_group: The feature group.
+            start_event_time: Only windows starting at or after this time (or exactly at it when `exact`).
+            end_event_time: Only windows ending at or before this time (or exactly at it when `exact`).
+            event_time: Name of the event-time feature the windows are sliced by.
+            exact: Match the bounds exactly instead of as a range.
+
+        Returns:
+            The count per `(start, end)` window, for the windows that carry one.
+        """
+        if exact:
+            rows = self._statistics_api._get(
+                feature_group,
+                start_event_time=start_event_time,
+                end_event_time=end_event_time,
+                event_time=event_time,
+                row_percentage=1.0,
+            )
+        else:
+            rows = self._statistics_api._get_all(
+                feature_group,
+                start_event_time=start_event_time,
+                end_event_time=end_event_time,
+                event_time=event_time,
+            )
+        if rows is None:
+            return {}
+        if not isinstance(rows, list):
+            rows = [rows]
+        return {
+            (row.window_start_event_time, row.window_end_event_time): row.boundary_count
+            for row in rows
+            if row.boundary_count is not None
+        }
 
     def _save_statistics(
         self, stats, metadata_instance, feature_view_obj
