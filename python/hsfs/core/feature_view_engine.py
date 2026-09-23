@@ -83,6 +83,10 @@ def _event_time_log_component(fv, event_time):
     return event_time, [name], constants.FEATURE_LOGGING.EVENT_TIME
 
 
+# The extra logging column that carries the identity of the serving code per row.
+SERVING_REVISION_COLUMN = "serving_revision"
+
+
 class FeatureViewEngine:
     ENTITY_TYPE = "featureview"
     _TRAINING_DATA_API_PATH = "trainingdatasets"
@@ -1721,6 +1725,7 @@ class FeatureViewEngine:
         extra_log_columns: feature.Feature | dict[str, Any] | None = None,
         materialization_interval: str | None = None,
         transport: str | None = None,
+        log_serving_revision: bool = True,
     ) -> feature_view.FeatureView:
         """Function to enable feature logging for a feature view. This function creates logging feature groups for the feature view.
 
@@ -1729,6 +1734,7 @@ class FeatureViewEngine:
             extra_log_columns: List of features to be logged.
             materialization_interval: `"hour"` or `"day"`; `None` keeps the platform default schedule.
             transport: `"realtime"` or `"job"`; `None` keeps the platform default.
+            log_serving_revision: Declare the reserved `serving_revision` column unless the caller declared it.
 
         Returns:
             Feature view object with feature logging enabled.
@@ -1757,6 +1763,14 @@ class FeatureViewEngine:
             if extra_log_columns
             else []
         )
+        if log_serving_revision and not any(
+            feat.name == SERVING_REVISION_COLUMN for feat in logging_features
+        ):
+            # Filled by the default predictor from the pod's environment; a custom predictor
+            # passes it through `extra_logging_features`.
+            logging_features.append(
+                feature.Feature(SERVING_REVISION_COLUMN, type="string")
+            )
 
         feature_logging = FeatureLogging(
             extra_logging_columns=logging_features,

@@ -5103,3 +5103,44 @@ class TestTrainingSpine:
         with self._engine()._staged_spine(spine):
             pass
         dataset_api.remove.assert_called_once()
+
+
+class TestEnableFeatureLoggingServingRevision:
+    def _engine(self, mocker):
+        mocker.patch("hopsworks_common.client._get_instance")
+        fv_engine = feature_view_engine.FeatureViewEngine(feature_store_id=99)
+        enable = mocker.patch.object(
+            fv_engine._feature_view_api, "_enable_feature_logging"
+        )
+        mocker.patch.object(fv_engine, "_get_feature_logging", return_value=None)
+        fv = MagicMock(logging_enabled=False)
+        fv.name, fv.version = "fv", 1
+        return fv_engine, enable, fv
+
+    def _declared(self, enable):
+        return [f.name for f in enable.call_args.args[2].extra_logging_columns]
+
+    def test_serving_revision_is_declared_by_default(self, mocker):
+        fv_engine, enable, fv = self._engine(mocker)
+
+        fv_engine._enable_feature_logging(
+            fv, extra_log_columns=[{"name": "channel", "type": "string"}]
+        )
+
+        assert self._declared(enable) == ["channel", "serving_revision"]
+
+    def test_serving_revision_can_be_left_out(self, mocker):
+        fv_engine, enable, fv = self._engine(mocker)
+
+        fv_engine._enable_feature_logging(fv, log_serving_revision=False)
+
+        assert self._declared(enable) == []
+
+    def test_a_caller_declaring_serving_revision_is_not_duplicated(self, mocker):
+        fv_engine, enable, fv = self._engine(mocker)
+
+        fv_engine._enable_feature_logging(
+            fv, extra_log_columns=[{"name": "serving_revision", "type": "string"}]
+        )
+
+        assert self._declared(enable) == ["serving_revision"]
