@@ -766,8 +766,8 @@ class TestFeatureMonitoringConfigEngine:
 
         mocker.patch.object(
             config_engine._monitoring_window_config_engine,
-            "_run_single_window_monitoring",
-            side_effect=[non_empty_fds, empty_fds],
+            "_run_single_window_monitoring_with_bounds",
+            side_effect=[(non_empty_fds, None, None), (empty_fds, None, None)],
         )
 
         saved_result = MagicMock()
@@ -821,14 +821,14 @@ class TestFeatureMonitoringConfigEngine:
         def side_effect_raise_on_second_call(*args, **kwargs):
             if side_effect_raise_on_second_call.call_count == 0:
                 side_effect_raise_on_second_call.call_count += 1
-                return non_empty_fds
+                return (non_empty_fds, None, None)
             raise RestAPIError("url", not_found_response)
 
         side_effect_raise_on_second_call.call_count = 0
 
         mocker.patch.object(
             config_engine._monitoring_window_config_engine,
-            "_run_single_window_monitoring",
+            "_run_single_window_monitoring_with_bounds",
             side_effect=side_effect_raise_on_second_call,
         )
 
@@ -908,8 +908,8 @@ class TestFeatureMonitoringConfigEngine:
 
         run_single_mock = mocker.patch.object(
             config_engine._monitoring_window_config_engine,
-            "_run_single_window_monitoring",
-            return_value=non_empty_fds,
+            "_run_single_window_monitoring_with_bounds",
+            return_value=(non_empty_fds, None, None),
         )
 
         saved_result = MagicMock()
@@ -957,8 +957,8 @@ class TestFeatureMonitoringConfigEngine:
 
         run_single_mock = mocker.patch.object(
             config_engine._monitoring_window_config_engine,
-            "_run_single_window_monitoring",
-            return_value=non_empty_fds,
+            "_run_single_window_monitoring_with_bounds",
+            return_value=(non_empty_fds, None, None),
         )
 
         saved_result = MagicMock()
@@ -998,3 +998,143 @@ class TestFeatureMonitoringConfigEngine:
             ValueError, match="specific_value is not allowed for distribution"
         ):
             config_engine._validate_statistics_comparison_config(mock_sc)
+
+
+class TestRunFeatureMonitoringEventTimeBounds:
+    def _engine_with_mocks(self, mocker, config, detection_bounds, reference_bounds):
+        config_engine = feature_monitoring_config_engine.FeatureMonitoringConfigEngine(
+            feature_store_id=DEFAULT_FEATURE_STORE_ID,
+            feature_group_id=DEFAULT_FEATURE_GROUP_ID,
+        )
+        mocker.patch.object(
+            config_engine._feature_monitoring_config_api,
+            "_get_by_name",
+            return_value=config,
+        )
+        fds = [FeatureDescriptiveStatistics(feature_name="amount", count=100)]
+        run_single = mocker.patch.object(
+            config_engine._monitoring_window_config_engine,
+            "_run_single_window_monitoring_with_bounds",
+            side_effect=[(fds, *detection_bounds), (fds, *reference_bounds)],
+        )
+        mocker.patch.object(
+            config_engine, "_resolve_event_time_feature", return_value=MagicMock()
+        )
+        comparison = mocker.patch.object(
+            config_engine._result_engine,
+            "_run_and_save_statistics_comparison",
+            return_value=MagicMock(),
+        )
+        return config_engine, run_single, comparison
+
+    def _config(self, event_time="event_ts"):
+        fs_configs = [
+            MagicMock(feature_name="amount", statistics_comparison_configs=None)
+        ]
+        config = MagicMock()
+        config.id = 42
+        config.get_feature_names.return_value = ["amount"]
+        config.feature_statistics_configs = fs_configs
+        config.detection_window_config = MagicMock(row_percentage=0.5)
+        config.reference_window_config = MagicMock()
+        config.event_time = event_time
+        config.model_name = None
+        config.model_version = None
+        config.trigger_type = "SCHEDULED"
+        return config
+
+    def test_window_bounds_reach_the_saved_result(self, mocker):
+        # Arrange
+        config = self._config()
+        config_engine, run_single, comparison = self._engine_with_mocks(
+            mocker,
+            config,
+            detection_bounds=(1704067200000, 1704070800000),
+            reference_bounds=(1703980800000, 1703984400000),
+        )
+
+        # Act
+        config_engine._run_feature_monitoring(entity=MagicMock(), config_name="cfg")
+
+        # Assert
+        kwargs = comparison.call_args.kwargs
+        assert kwargs["detection_window_bounds"] == (1704067200000, 1704070800000)
+        assert kwargs["reference_window_bounds"] == (1703980800000, 1703984400000)
+        assert (
+            run_single.call_args_list[0].kwargs["monitoring_window_config"]
+            is config.detection_window_config
+        )
+
+    def test_detection_window_override_builds_an_event_time_range(self, mocker):
+        # Arrange
+        config = self._config()
+        config_engine, run_single, comparison = self._engine_with_mocks(
+            mocker,
+            config,
+            detection_bounds=(1704067200000, 1704070800000),
+            reference_bounds=(None, None),
+        )
+
+        # Act
+        config_engine._run_feature_monitoring(
+            entity=MagicMock(),
+            config_name="cfg",
+            detection_window_override=(1704067200000, 1704070800000),
+        )
+
+        # Assert
+        window = run_single.call_args_list[0].kwargs["monitoring_window_config"]
+        assert window.window_config_type == mwc.WindowConfigType.EVENT_TIME_RANGE
+        assert (window.start_event_time, window.end_event_time) == (
+            1704067200000,
+            1704070800000,
+        )
+        assert window.row_percentage == 0.5
+        # the reference window is the configured one
+        assert (
+            run_single.call_args_list[1].kwargs["monitoring_window_config"]
+            is config.reference_window_config
+        )
+        assert comparison.call_args.kwargs["reference_window_bounds"] == (None, None)
+
+    def test_detection_window_override_needs_an_event_time(self, mocker):
+        from hopsworks_common.client.exceptions import FeatureStoreException
+
+        config = self._config(event_time=None)
+        config_engine, _, _ = self._engine_with_mocks(
+            mocker, config, (None, None), (None, None)
+        )
+        with pytest.raises(FeatureStoreException, match="no event_time feature"):
+            config_engine._run_feature_monitoring(
+                entity=MagicMock(),
+                config_name="cfg",
+                detection_window_override=(1704067200000, 1704070800000),
+            )
+
+    def test_trigger_monitoring_job_with_bounds_repeats_the_default_args(self, mocker):
+        # Arrange
+        config_engine = feature_monitoring_config_engine.FeatureMonitoringConfigEngine(
+            feature_store_id=DEFAULT_FEATURE_STORE_ID,
+            feature_group_id=DEFAULT_FEATURE_GROUP_ID,
+        )
+        job = MagicMock()
+        job.config = {"defaultArgs": "-op run_fm -path /Projects/p/Resources/cfg.json"}
+        mocker.patch.object(config_engine._job_api, "get_job", return_value=job)
+        launch = mocker.patch.object(config_engine._job_api, "launch")
+
+        # Act
+        config_engine._trigger_monitoring_job(
+            job_name="fg_1_cfg_run_feature_monitoring",
+            start_event_time="2024-01-01 00:00:00",
+            end_event_time=1704070800000,
+        )
+        config_engine._trigger_monitoring_job(
+            job_name="fg_1_cfg_run_feature_monitoring"
+        )
+
+        # Assert
+        assert launch.call_args_list[0].kwargs["args"] == (
+            "-op run_fm -path /Projects/p/Resources/cfg.json "
+            "-start_event_time 1704067200000 -end_event_time 1704070800000"
+        )
+        assert launch.call_args_list[1].kwargs["args"] is None

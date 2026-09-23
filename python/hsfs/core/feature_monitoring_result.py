@@ -53,6 +53,10 @@ class FeatureMonitoringResult:
         empty_reference_window: bool | None = None,
         raised_exception: bool = False,
         detection_window_commit_time: int | None = None,
+        detection_window_start_event_time: int | None = None,
+        detection_window_end_event_time: int | None = None,
+        reference_window_start_event_time: int | None = None,
+        reference_window_end_event_time: int | None = None,
         id: int | None = None,
         href: str | None = None,
         **kwargs,
@@ -73,6 +77,10 @@ class FeatureMonitoringResult:
         self._empty_reference_window = empty_reference_window
         self._raised_exception = raised_exception
         self._detection_window_commit_time = detection_window_commit_time
+        self._detection_window_start_event_time = detection_window_start_event_time
+        self._detection_window_end_event_time = detection_window_end_event_time
+        self._reference_window_start_event_time = reference_window_start_event_time
+        self._reference_window_end_event_time = reference_window_end_event_time
 
     def _parse_feature_statistics_results(
         self,
@@ -120,6 +128,14 @@ class FeatureMonitoringResult:
         }
         if self._detection_window_commit_time is not None:
             the_dict["detectionWindowCommitTime"] = self._detection_window_commit_time
+        for key, value in (
+            ("detectionWindowStartEventTime", self._detection_window_start_event_time),
+            ("detectionWindowEndEventTime", self._detection_window_end_event_time),
+            ("referenceWindowStartEventTime", self._reference_window_start_event_time),
+            ("referenceWindowEndEventTime", self._reference_window_end_event_time),
+        ):
+            if value is not None:
+                the_dict[key] = value
         if self._feature_statistics_results is not None:
             the_dict["featureStatisticsResults"] = [
                 fs_result.to_dict() for fs_result in self._feature_statistics_results
@@ -206,6 +222,30 @@ class FeatureMonitoringResult:
         Used to detect whether a new commit has arrived since the last run.
         """
         return self._detection_window_commit_time
+
+    @public
+    @property
+    def detection_window_start_event_time(self) -> int | None:
+        """Inclusive start, in epoch milliseconds, of the detection window on the event-time axis; `None` when the config has no event_time."""
+        return self._detection_window_start_event_time
+
+    @public
+    @property
+    def detection_window_end_event_time(self) -> int | None:
+        """Exclusive end, in epoch milliseconds, of the detection window on the event-time axis; `None` when the config has no event_time."""
+        return self._detection_window_end_event_time
+
+    @public
+    @property
+    def reference_window_start_event_time(self) -> int | None:
+        """Inclusive start, in epoch milliseconds, of the reference window on the event-time axis; `None` for a training-dataset reference or without event_time."""
+        return self._reference_window_start_event_time
+
+    @public
+    @property
+    def reference_window_end_event_time(self) -> int | None:
+        """Exclusive end, in epoch milliseconds, of the reference window on the event-time axis; `None` for a training-dataset reference or without event_time."""
+        return self._reference_window_end_event_time
 
     @public
     @property

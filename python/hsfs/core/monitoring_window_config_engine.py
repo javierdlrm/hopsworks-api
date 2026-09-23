@@ -29,6 +29,8 @@ from hsfs.training_dataset_split import TrainingDatasetSplit
 
 
 if TYPE_CHECKING:
+    from datetime import date
+
     from hsfs.core.feature_descriptive_statistics import FeatureDescriptiveStatistics
 
 
@@ -60,7 +62,23 @@ class MonitoringWindowConfigEngine:
         window_length: str | None = None,
         training_dataset_version: int | None = None,
         row_percentage: float | None = None,
+        start_event_time: int | datetime | date | str | None = None,
+        end_event_time: int | datetime | date | str | None = None,
     ) -> mwc.WindowConfigType:
+        if start_event_time is not None or end_event_time is not None:
+            if any(
+                [
+                    time_offset is not None,
+                    window_length is not None,
+                    training_dataset_version is not None,
+                ]
+            ):
+                raise ValueError(
+                    "If start_event_time or end_event_time is set, no time offset, window length "
+                    "or training dataset version can be set."
+                )
+            return mwc.WindowConfigType.EVENT_TIME_RANGE
+
         if isinstance(training_dataset_version, int):
             if any(
                 [
@@ -90,6 +108,8 @@ class MonitoringWindowConfigEngine:
         window_length: str | None = None,
         training_dataset_version: int | None = None,
         row_percentage: float | None = None,
+        start_event_time: int | datetime | date | str | None = None,
+        end_event_time: int | datetime | date | str | None = None,
     ) -> mwc.MonitoringWindowConfig:
         """Builds a monitoring window config.
 
@@ -98,7 +118,7 @@ class MonitoringWindowConfigEngine:
                 Id of the monitoring window config in hopsworks.
             window_config_type: str, required
                 Type of the window config, can be either
-                `ROLLING_TIME`, `ALL_TIME`,`TRAINING_DATASET`.
+                `ROLLING_TIME`, `ALL_TIME`, `TRAINING_DATASET`, `EVENT_TIME_RANGE`.
             time_offset: str, optional
                 monitoring window start time is computed as "now - time_offset".
             window_length: str, optional
@@ -108,6 +128,10 @@ class MonitoringWindowConfigEngine:
                 Specific id of an entity that has fixed statistics.
             row_percentage: float, optional
                 Percentage of rows to be used for statistics computation.
+            start_event_time: optional
+                inclusive start of an explicit event-time window.
+            end_event_time: optional
+                exclusive end of an explicit event-time window.
 
         Returns:
             The monitoring window configuration.
@@ -117,6 +141,8 @@ class MonitoringWindowConfigEngine:
             window_length=window_length,
             training_dataset_version=training_dataset_version,
             row_percentage=row_percentage,
+            start_event_time=start_event_time,
+            end_event_time=end_event_time,
         )
 
         if (
@@ -129,7 +155,11 @@ class MonitoringWindowConfigEngine:
 
         if (
             window_config_type
-            in [mwc.WindowConfigType.ROLLING_TIME, mwc.WindowConfigType.ALL_TIME]
+            in [
+                mwc.WindowConfigType.ROLLING_TIME,
+                mwc.WindowConfigType.ALL_TIME,
+                mwc.WindowConfigType.EVENT_TIME_RANGE,
+            ]
             and row_percentage is None
         ):
             row_percentage = 1.0
@@ -141,22 +171,23 @@ class MonitoringWindowConfigEngine:
             window_length=window_length,
             training_dataset_version=training_dataset_version,
             row_percentage=row_percentage,
+            start_event_time=start_event_time,
+            end_event_time=end_event_time,
         )
 
     def _time_range_str_to_time_delta(
         self, time_range: str, field_name: str | None = "time_offset"
     ) -> timedelta:
-        # sanitize input
-        value_error_message = f"Invalid {field_name} format: {time_range}. Use format: 1w2d3h for 1 week, 2 days and 3 hours."
+        # sanitize input; the minute is the finest unit
+        value_error_message = f"Invalid {field_name} format: {time_range}. Use format: 1w2d3h4m for 1 week, 2 days, 3 hours and 4 minutes."
         if (
             len(time_range) > self._MAX_TIME_RANGE_LENGTH
-            or re.search(r"([^dwh\d]+)", time_range) is not None
+            or re.search(r"([^dwhm\d]+)", time_range) is not None
         ):
             raise ValueError(value_error_message)
 
         matches = re.search(
-            # r"^(?!$)(?:.*(?P<week>\d+)w)?(?:.*(?P<day>\d+)d)?(?:.*(?P<hour>\d+)h)?$",
-            r"(?:(?P<week>\d+w)()|(?P<day>\d+d)()|(?P<hour>\d+h)())+",
+            r"(?:(?P<week>\d+w)()|(?P<day>\d+d)()|(?P<hour>\d+h)()|(?P<minute>\d+m)())+",
             time_range,
         )
         if matches is None:
@@ -177,8 +208,13 @@ class MonitoringWindowConfigEngine:
             if matches.group("hour") is not None
             else 0
         )
+        minutes = (
+            int(matches.group("minute").replace("m", ""))
+            if matches.group("minute") is not None
+            else 0
+        )
 
-        return timedelta(weeks=weeks, days=days, hours=hours)
+        return timedelta(weeks=weeks, days=days, hours=hours, minutes=minutes)
 
     def _get_window_start_end_times(
         self,
@@ -202,6 +238,8 @@ class MonitoringWindowConfigEngine:
 
         ALL_TIME windows and windows without a ``time_offset`` always return
         ``start_time=None`` regardless of ``anchor_end_ms``.
+        EVENT_TIME_RANGE windows return their explicit bounds regardless of the
+        anchor and of the wall-clock time.
 
         Parameters:
             monitoring_window_config: Window configuration describing the type,
@@ -215,6 +253,15 @@ class MonitoringWindowConfigEngine:
             A (start_time_ms, end_time_ms) tuple where start_time_ms is None
             for ALL_TIME and no-offset windows.
         """
+        if (
+            monitoring_window_config.window_config_type
+            == mwc.WindowConfigType.EVENT_TIME_RANGE
+        ):
+            return (
+                monitoring_window_config.start_event_time,
+                monitoring_window_config.end_event_time,
+            )
+
         if anchor_end_ms is not None:
             # Work in milliseconds directly to avoid the datetime→ms round-trip
             # producing a wrong value when the local timezone is not UTC.
@@ -302,6 +349,32 @@ class MonitoringWindowConfigEngine:
     ) -> list[FeatureDescriptiveStatistics]:
         """Fetch the entity data based on monitoring window configuration and compute statistics.
 
+        See `_run_single_window_monitoring_with_bounds` for the variant that also returns
+        the window bounds the statistics were computed on.
+        """
+        statistics, _, _ = self._run_single_window_monitoring_with_bounds(
+            entity=entity,
+            monitoring_window_config=monitoring_window_config,
+            feature_names=feature_names,
+            profile_flags=profile_flags,
+            end_commit_time_override=end_commit_time_override,
+            model_filter=model_filter,
+            event_time_feature=event_time_feature,
+        )
+        return statistics
+
+    def _run_single_window_monitoring_with_bounds(
+        self,
+        entity: feature_group.FeatureGroupBase | feature_view.FeatureView,
+        monitoring_window_config: mwc.MonitoringWindowConfig,
+        feature_names: list[str],
+        profile_flags: dict | None = None,
+        end_commit_time_override: int | None = None,
+        model_filter: tuple[str, int] | None = None,
+        event_time_feature: Feature | None = None,
+    ) -> tuple[list[FeatureDescriptiveStatistics], int | None, int | None]:
+        """Fetch the entity data based on monitoring window configuration and compute statistics.
+
         Parameters:
             entity: The entity to monitor.
             monitoring_window_config: Monitoring window config.
@@ -321,14 +394,10 @@ class MonitoringWindowConfigEngine:
                 enumerates per-commit statistics).
 
         Returns:
-            List of Descriptive statistics.
+            The descriptive statistics and the `(start, end)` bounds of the window they were
+            computed on, in milliseconds; both bounds are `None` for a training-dataset window.
         """
         self._init_statistics_engine(entity._feature_store_id, entity.ENTITY_TYPE)
-        # No names means all features: the profiler then skips unprofilable ones itself.
-        if feature_names:
-            feature_names = self._profilable_feature_names(entity, feature_names)
-            if not feature_names:
-                return []
         (
             start_time,
             end_time,
@@ -336,6 +405,27 @@ class MonitoringWindowConfigEngine:
             monitoring_window_config=monitoring_window_config,
             anchor_end_ms=end_commit_time_override,
         )
+        if (
+            monitoring_window_config.window_config_type
+            == mwc.WindowConfigType.EVENT_TIME_RANGE
+            and event_time_feature is None
+        ):
+            raise ValueError(
+                "An EVENT_TIME_RANGE window needs the monitoring config to declare an event_time feature."
+            )
+        # the bounds recorded on the result: only meaningful on the event-time axis
+        bounds = (
+            (start_time, end_time)
+            if event_time_feature is not None
+            and monitoring_window_config.window_config_type
+            != mwc.WindowConfigType.TRAINING_DATASET
+            else (None, None)
+        )
+        # No names means all features: the profiler then skips unprofilable ones itself.
+        if feature_names:
+            feature_names = self._profilable_feature_names(entity, feature_names)
+            if not feature_names:
+                return [], bounds[0], bounds[1]
 
         registered_stats = None  # no stats by default value
 
@@ -463,8 +553,12 @@ class MonitoringWindowConfigEngine:
                 )
 
             if merged_fds_list is not None:
-                return self._select_feature_descriptive_statistics(
-                    reused_statistics + merged_fds_list, feature_names
+                return (
+                    self._select_feature_descriptive_statistics(
+                        reused_statistics + merged_fds_list, feature_names
+                    ),
+                    bounds[0],
+                    bounds[1],
                 )
 
             # Fetch the actual data for which to compute statistics based on row_percentage and time window.
@@ -537,8 +631,12 @@ class MonitoringWindowConfigEngine:
                 for fds in registered_stats.feature_descriptive_statistics
             }
         )
-        return self._select_feature_descriptive_statistics(
-            list(by_name.values()), feature_names
+        return (
+            self._select_feature_descriptive_statistics(
+                list(by_name.values()), feature_names
+            ),
+            bounds[0],
+            bounds[1],
         )
 
     @staticmethod

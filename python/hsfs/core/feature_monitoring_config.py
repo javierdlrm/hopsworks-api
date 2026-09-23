@@ -347,6 +347,8 @@ class FeatureMonitoringConfig:
         time_offset: str | None = None,
         window_length: str | None = None,
         row_percentage: float | None = None,
+        start_event_time: int | datetime | date | str | None = None,
+        end_event_time: int | datetime | date | str | None = None,
     ) -> FeatureMonitoringConfig:
         """Sets the detection window of data to compute statistics on.
 
@@ -373,26 +375,41 @@ class FeatureMonitoringConfig:
                 window_length="1d",
                 row_percentage=0.1,
             ).with_reference_window(...).compare_on(...).save()
+            # Compute statistics on an explicit event-time window [start, end)
+            fg.create_scheduled_statistics(
+                name="january_first_hour",
+                event_time="event_ts",
+            ).with_detection_window(
+                start_event_time="2024-01-01 00:00:00",
+                end_event_time="2024-01-01 01:00:00",
+            ).save()
             ```
 
         Parameters:
             time_offset: The time offset from the current time to the start of the time window.
             window_length: The length of the time window.
             row_percentage: The fraction of rows to use when computing the statistics [0, 1.0].
+            start_event_time: Inclusive start of an explicit window on the event-time axis.
+                Requires the config to declare an `event_time` feature.
+            end_event_time: Exclusive end of an explicit window on the event-time axis.
 
         Returns:
             The updated FeatureMonitoringConfig object.
         """
         # Setter is using the engine class to perform input validation.
+        if start_event_time is not None or end_event_time is not None:
+            window_config_type = mwc.WindowConfigType.EVENT_TIME_RANGE
+        elif time_offset or window_length:
+            window_config_type = mwc.WindowConfigType.ROLLING_TIME
+        else:
+            window_config_type = mwc.WindowConfigType.ALL_TIME
         self.detection_window_config = {
-            "window_config_type": (
-                mwc.WindowConfigType.ROLLING_TIME
-                if time_offset or window_length
-                else mwc.WindowConfigType.ALL_TIME
-            ),
+            "window_config_type": window_config_type,
             "time_offset": time_offset,
             "window_length": window_length,
             "row_percentage": row_percentage,
+            "start_event_time": start_event_time,
+            "end_event_time": end_event_time,
         }
 
         return self
@@ -403,6 +420,8 @@ class FeatureMonitoringConfig:
         time_offset: str | None = None,
         window_length: str | None = None,
         row_percentage: float | None = None,
+        start_event_time: int | datetime | date | str | None = None,
+        end_event_time: int | datetime | date | str | None = None,
     ) -> FeatureMonitoringConfig:
         """Sets the reference window of data to compute statistics on.
 
@@ -428,6 +447,9 @@ class FeatureMonitoringConfig:
             time_offset: The time offset from the current time to the start of the time window.
             window_length: The length of the time window.
             row_percentage: The percentage of rows to use when computing the statistics. Defaults to 20%.
+            start_event_time: Inclusive start of an explicit reference window on the event-time axis.
+                Requires the config to declare an `event_time` feature.
+            end_event_time: Exclusive end of an explicit reference window on the event-time axis.
 
         Returns:
             The updated FeatureMonitoringConfig object.
@@ -440,6 +462,8 @@ class FeatureMonitoringConfig:
             "time_offset": time_offset,
             "window_length": window_length,
             "row_percentage": row_percentage,
+            "start_event_time": start_event_time,
+            "end_event_time": end_event_time,
         }
 
         return self
@@ -817,7 +841,11 @@ class FeatureMonitoringConfig:
         return self._feature_monitoring_config_engine._update(self)
 
     @public
-    def run_once(self) -> Job:
+    def run_once(
+        self,
+        start_event_time: int | datetime | date | str | None = None,
+        end_event_time: int | datetime | date | str | None = None,
+    ) -> Job:
         """Trigger the feature monitoring job once which computes and compares statistics on the detection and reference windows.
 
         Example:
@@ -827,15 +855,27 @@ class FeatureMonitoringConfig:
             # Fetch registered config by name
             my_monitoring_config = fg.get_feature_monitoring_configs(name="my_monitoring_config")
             # Trigger the feature monitoring job once
-            my_monitoring_config.run_job()
+            my_monitoring_config.run_once()
+            # Run the detection window over an explicit event-time range instead of the configured one
+            my_monitoring_config.run_once(
+                start_event_time="2024-01-01 00:00:00",
+                end_event_time="2024-01-01 01:00:00",
+            )
             ```
 
         Info:
             The feature monitoring job will be triggered asynchronously and the method will return immediately.
             Calling this method does not affect the ongoing schedule.
 
+        Parameters:
+            start_event_time: Inclusive start of an explicit event-time window for the detection
+                window of this run only.
+                Requires the config to declare an `event_time` feature.
+            end_event_time: Exclusive end of that window.
+
         Raises:
             hopsworks.client.exceptions.FeatureStoreException: If the feature monitoring config has not been saved.
+            ValueError: If only one of the two bounds is given.
 
         Returns:
             A handle for the job computing the statistics.
@@ -844,9 +884,15 @@ class FeatureMonitoringConfig:
             raise FeatureStoreException(
                 "Feature monitoring config must be registered via `.save()` before computing statistics."
             )
+        if (start_event_time is None) != (end_event_time is None):
+            raise ValueError(
+                "start_event_time and end_event_time must be given together."
+            )
 
         return self._feature_monitoring_config_engine._trigger_monitoring_job(
-            job_name=self.job_name
+            job_name=self.job_name,
+            start_event_time=start_event_time,
+            end_event_time=end_event_time,
         )
 
     @public
@@ -948,6 +994,8 @@ class FeatureMonitoringConfig:
         start_time: datetime | date | str | int | None = None,
         end_time: datetime | date | str | int | None = None,
         with_statistics: bool = True,
+        start_event_time: datetime | date | str | int | None = None,
+        end_event_time: datetime | date | str | int | None = None,
     ) -> list[FeatureMonitoringResult]:
         """Fetch the history of the computed statistics and comparison results for this configuration.
 
@@ -968,6 +1016,8 @@ class FeatureMonitoringConfig:
             start_time: The start time of the time range to fetch the history for.
             end_time: The end time of the time range to fetch the history for.
             with_statistics: Whether to include the computed statistics in the results.
+            start_event_time: Only results whose detection window starts at or after this event time.
+            end_event_time: Only results whose detection window ends at or before this event time.
 
         Returns:
             A list of FeatureMonitoringResult objects containing the history of the computed statistics and comparison results for this configuration.
@@ -985,6 +1035,8 @@ class FeatureMonitoringConfig:
             start_time=start_time,
             end_time=end_time,
             with_statistics=with_statistics,
+            start_event_time=start_event_time,
+            end_event_time=end_event_time,
         )
 
     @public
