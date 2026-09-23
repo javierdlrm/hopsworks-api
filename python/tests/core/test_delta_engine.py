@@ -2928,3 +2928,68 @@ def test_commit_properties_become_a_delta_application_transaction(monkeypatch):
         ("fg/chunk/a", 1),
         ("fg/chunk/b", 1),
     ]
+
+
+class TestReadWithCommitTime:
+    def _engine(self, mocker):
+        _patch_client(mocker, is_external=False)
+        import pyspark.sql.functions as _psf
+
+        fake_col = mock.Mock(return_value=mock.Mock())
+        fake_col.return_value.isin.return_value = mock.Mock()
+        fake_col.return_value.alias.side_effect = lambda name: f"alias:{name}"
+        mocker.patch.object(_psf, "col", fake_col)
+        spark = mock.Mock()
+        fg = _make_fg("hopsfs://nn:8020/p")
+        fg.prepare_spark_location.return_value = "loc"
+        fg.features = [SimpleNamespace(name="amount"), SimpleNamespace(name="card_id")]
+        return DeltaEngine(1, "fs", fg, spark, None), spark
+
+    def test_reads_the_change_feed_over_the_commit_window(self, mocker):
+        engine, spark = self._engine(mocker)
+        loaded = spark.read.format.return_value.options.return_value.load.return_value
+        filtered = loaded.filter.return_value
+
+        result = engine._read_with_commit_time(
+            start_commit_time=1704067200000, end_commit_time=1704070800000
+        )
+
+        options = spark.read.format.return_value.options.call_args.kwargs
+        assert options["readChangeFeed"] == "true"
+        assert options["startingTimestamp"].startswith("2024-01-01")
+        assert options["endingTimestamp"].startswith("2024-01-01")
+        assert "startingVersion" not in options
+        filtered.select.assert_called_once_with(
+            "amount", "card_id", "alias:commit_time", "alias:commit_version"
+        )
+        assert result is filtered.select.return_value
+
+    def test_reads_from_the_first_version_without_a_start(self, mocker):
+        engine, spark = self._engine(mocker)
+
+        engine._read_with_commit_time()
+
+        options = spark.read.format.return_value.options.call_args.kwargs
+        assert options == {"readChangeFeed": "true", "startingVersion": 0}
+
+    def test_retries_from_the_earliest_version_when_delta_rejects_the_start(
+        self, mocker
+    ):
+        engine, spark = self._engine(mocker)
+        first = mock.Mock()
+        first.filter.side_effect = Exception(
+            "The provided timestamp is before the earliest version available"
+        )
+        second = mock.Mock()
+        spark.read.format.return_value.options.return_value.load.side_effect = [
+            first,
+            second,
+        ]
+        mocker.patch.object(engine, "_get_delta_earliest_commit", return_value=(7, 0))
+
+        engine._read_with_commit_time(start_commit_time=1704067200000)
+
+        retry_options = spark.read.format.return_value.options.call_args_list[1].kwargs
+        assert retry_options["startingVersion"] == 7
+        assert "startingTimestamp" not in retry_options
+        second.filter.return_value.select.assert_called_once()

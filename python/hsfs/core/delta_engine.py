@@ -283,6 +283,75 @@ class DeltaEngine:
                         )
                 _do_cdf_read(retry_opts).createOrReplaceTempView(delta_fg_alias.alias)
 
+    COMMIT_TIME_COLUMN = "commit_time"
+    COMMIT_VERSION_COLUMN = "commit_version"
+
+    def _read_with_commit_time(
+        self,
+        start_commit_time: int | None = None,
+        end_commit_time: int | None = None,
+        read_options: dict[str, Any] | None = None,
+    ):
+        """Read the rows committed in a commit-time window together with the commit that wrote each of them.
+
+        The change data feed carries the commit timestamp and version of every row; a read through the query service projects them away.
+        Rows deleted or replaced by a later commit in the window are not returned, as in a change-feed query.
+
+        Parameters:
+            start_commit_time: Inclusive start of the window, epoch milliseconds; the first commit when `None`.
+            end_commit_time: Inclusive end of the window, epoch milliseconds; the latest commit when `None`.
+            read_options: Extra Delta read options.
+
+        Returns:
+            A Spark dataframe with the feature group's features, `commit_time` (timestamp) and `commit_version` (long).
+        """
+        from pyspark.sql.functions import col
+
+        location = self._feature_group.prepare_spark_location()
+        options: dict[str, Any] = {"readChangeFeed": "true"}
+        if start_commit_time is not None:
+            options["startingTimestamp"] = util._get_delta_datestr_from_timestamp(
+                start_commit_time
+            )
+        else:
+            options["startingVersion"] = 0
+        if end_commit_time is not None:
+            options["endingTimestamp"] = util._get_delta_datestr_from_timestamp(
+                end_commit_time
+            )
+        for key, value in (read_options or {}).items():
+            options[
+                key[len(self.DELTA_DOT_PREFIX) :]
+                if isinstance(key, str) and key.startswith(self.DELTA_DOT_PREFIX)
+                else key
+            ] = value
+
+        def _read(opts):
+            return (
+                self._spark_session.read.format(self.DELTA_SPARK_FORMAT)
+                .options(**opts)
+                .load(location)
+                .filter(col("_change_type").isin("update_postimage", "insert"))
+            )
+
+        try:
+            changes = _read(options)
+        except Exception as e:  # noqa: BLE001 - Delta reports the bound in the message
+            if "before the earliest version" not in str(e):
+                raise
+            # the backend-recorded commit time precedes Delta's own by a few hundred
+            # milliseconds; the same retry as the change-feed query
+            earliest = self._get_delta_earliest_commit(location)
+            options.pop("startingTimestamp", None)
+            options["startingVersion"] = earliest[0] if earliest is not None else 0
+            changes = _read(options)
+        feature_names = [feature.name for feature in self._feature_group.features]
+        return changes.select(
+            *feature_names,
+            col("_commit_timestamp").alias(self.COMMIT_TIME_COLUMN),
+            col("_commit_version").alias(self.COMMIT_VERSION_COLUMN),
+        )
+
     def _setup_delta_read_opts(
         self,
         delta_fg_alias: hudi_feature_group_alias.HudiFeatureGroupAlias,

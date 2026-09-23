@@ -1092,6 +1092,31 @@ class FeatureGroupBase:
         """
         return self._feature_group_engine._get_tag(self, name)
 
+    COMPUTATION_PATH_TAG = "computation_path"
+
+    @public
+    def set_computation_path(self, computation_path: str) -> None:
+        """Declare which computation path fills this feature group, for example `"stream"` or `"backfill"`.
+
+        Two feature groups computed from the same source by different paths are expected to agree; the declaration is a tag named `computation_path`, so a tag schema of that name (a string) must exist in the cluster.
+
+        Parameters:
+            computation_path: The name of the path.
+
+        Raises:
+            hopsworks.client.exceptions.RestAPIError: If the backend encounters an error when handling the request, such as a missing tag schema.
+        """
+        self.add_tag(self.COMPUTATION_PATH_TAG, computation_path)
+
+    @public
+    def get_computation_path(self) -> str | None:
+        """The declared computation path of this feature group, or `None` when undeclared.
+
+        Raises:
+            hopsworks.client.exceptions.RestAPIError: If the backend encounters an error when handling the request.
+        """
+        return self.get_tag(self.COMPUTATION_PATH_TAG)
+
     @public
     def get_tags(self) -> dict[str, Any]:
         """Retrieves all tags attached to a feature group.
@@ -4210,6 +4235,59 @@ class FeatureGroup(FeatureGroupBase):
             query = query.filter(time_filter)
 
         return query.read(online, dataframe_type, read_options or {})
+
+    @public
+    def read_with_commit_time(
+        self,
+        start_commit_time: str | int | datetime | date | None = None,
+        end_commit_time: str | int | datetime | date | None = None,
+        read_options: dict | None = None,
+        dataframe_type: Literal["default", "spark", "pandas", "polars"] = "default",
+    ) -> pd.DataFrame | TypeVar("pyspark.sql.DataFrame") | TypeVar("pl.DataFrame"):  # noqa: F821
+        """Read the rows committed in a commit-time window together with the commit that wrote each row.
+
+        Every row comes back with two extra columns: `commit_time`, the timestamp of the commit that wrote it, and `commit_version`, the version of that commit.
+        With them a row can be placed on the commit axis of the feature group, next to its event time.
+        Rows deleted or replaced by a later commit in the window are not returned.
+
+        Only Delta feature groups on the Spark engine support this read: the commit columns come from the change data feed, which the query service does not project.
+
+        Example:
+            ```python
+            rows = fg.read_with_commit_time(
+                start_commit_time="2024-01-01 00:00:00",
+                end_commit_time="2024-01-01 06:00:00",
+            )
+            ```
+
+        Parameters:
+            start_commit_time: Inclusive start of the commit-time window; the first commit when `None`.
+            end_commit_time: Inclusive end of the commit-time window; the latest commit when `None`.
+            read_options: Extra Delta read options.
+            dataframe_type: The type of dataframe to return.
+
+        Returns:
+            The rows with their `commit_time` and `commit_version`.
+
+        Raises:
+            hopsworks.client.exceptions.FeatureStoreException: If the feature group is not a Delta feature group, or the engine is not Spark.
+        """
+        if self._time_travel_format != "DELTA":
+            raise FeatureStoreException(
+                "Reading rows with their commit time needs the Delta change data feed; this "
+                f"feature group uses {self._time_travel_format!r}."
+            )
+        return engine._get_instance()._read_with_commit_time(
+            self,
+            start_commit_time=util._convert_event_time_to_timestamp(start_commit_time)
+            if start_commit_time is not None
+            else None,
+            end_commit_time=util._convert_event_time_to_timestamp(end_commit_time)
+            if end_commit_time is not None
+            else None,
+            read_options=read_options,
+            dataframe_type=dataframe_type,
+        )
 
     @public
     def read_changes(
