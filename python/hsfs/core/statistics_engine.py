@@ -619,10 +619,13 @@ class StatisticsEngine:
                 "to the online storage of a feature group."
             )
 
-        # compute statistics for all features with transformation fn
+        # compute statistics for all features with transformation fn. The reference summary of a
+        # training dataset's inputs is more than the scalars a scaler needs: the histogram and the
+        # KLL sketch of every input are kept next to them so a later window can be compared with
+        # the training distribution (the KLL sketch is computed by the Spark profiler only).
         all_columns = (columns or []) + (label_encoder_features or [])
         stats_str = engine._get_instance()._profile(
-            feature_dataframe, all_columns, False, True, False
+            feature_dataframe, all_columns, False, True, False, kll=True
         )
 
         # add unique values profile to column stats

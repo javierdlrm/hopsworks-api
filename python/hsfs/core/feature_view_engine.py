@@ -1083,6 +1083,24 @@ class FeatureViewEngine:
             feature_view_obj.name, feature_view_obj.version, training_dataset_version
         )
 
+    def _get_latest_training_dataset_version(
+        self, feature_view_obj: feature_view.FeatureView
+    ) -> int:
+        """The highest training dataset version of a feature view.
+
+        Raises:
+            hopsworks.client.exceptions.FeatureStoreException: If the feature view has no training dataset.
+        """
+        tds = self._feature_view_api._get_training_datasets(
+            feature_view_obj.name, feature_view_obj.version
+        )
+        if not tds:
+            raise FeatureStoreException(
+                f"Feature view {feature_view_obj.name} v{feature_view_obj.version} has no "
+                "training dataset; create one or pass training_dataset_version."
+            )
+        return max(td.version for td in tds)
+
     def _get_training_datasets_metadata(
         self, feature_view_obj: feature_view.FeatureView
     ):

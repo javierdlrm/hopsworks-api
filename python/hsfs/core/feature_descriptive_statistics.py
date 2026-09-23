@@ -379,3 +379,35 @@ class FeatureDescriptiveStatistics:
     def extended_statistics(self) -> dict | None:
         """Additional statistics computed on the feature values such as histograms and correlations."""
         return self._extended_statistics
+
+    @public
+    @property
+    def histogram(self) -> list[dict] | None:
+        """The histogram of the feature values as a list of buckets, or `None` when not computed.
+
+        A numeric feature's buckets carry `low_value`, `high_value` and `count`; a categorical feature's buckets carry `value` and `count`.
+        """
+        if not self._extended_statistics:
+            return None
+        return self._extended_statistics.get("histogram")
+
+    @public
+    @property
+    def kll(self) -> dict | None:
+        """The KLL quantile sketch of a numeric feature (its serialised sketch and quantile buckets), or `None` when not computed."""
+        if not self._extended_statistics:
+            return None
+        return self._extended_statistics.get("kll")
+
+    @public
+    @property
+    def value_counts(self) -> dict[str, int] | None:
+        """The count per value of a categorical feature, from its histogram, or `None` when the feature has no value histogram."""
+        histogram = self.histogram
+        if not histogram or not all(
+            isinstance(bucket, dict) and "value" in bucket for bucket in histogram
+        ):
+            return None
+        return {
+            str(bucket["value"]): int(bucket.get("count", 0)) for bucket in histogram
+        }

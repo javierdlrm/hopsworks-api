@@ -19,12 +19,14 @@ import json
 import typing
 import warnings
 
+import pandas as pd
 import pytest
 from hopsworks_common import version
 from hopsworks_common.client.exceptions import FeatureStoreException
 from hsfs import feature, feature_group, feature_view, training_dataset_feature
 from hsfs.builtin_transformations import one_hot_encoder
 from hsfs.constructor import query
+from hsfs.core import feature_descriptive_statistics
 from hsfs.feature_store import FeatureStore
 from hsfs.hopsworks_udf import udf
 from hsfs.serving_key import ServingKey
@@ -2504,3 +2506,130 @@ class TestFeatureViewAppliedCodeVersions:
         }
         for name, identity in applied.items():
             assert identity.startswith(f"{name}@v")
+
+
+class TestFeatureViewReplay:
+    def _view_with(self, mocker, backend_fixtures, tf):
+        mocker.patch("hopsworks_common.client._get_instance")
+        json = backend_fixtures["feature_view"]["get"]["response"]
+        fv = feature_view.FeatureView.from_response_json(json)
+        fv._transformation_functions = [tf]
+        return fv
+
+    def _scaler(self, version=1):
+        from hsfs.hopsworks_udf import udf
+        from hsfs.transformation_function import (
+            TransformationFunction,
+            TransformationType,
+        )
+        from hsfs.transformation_statistics import TransformationStatistics
+
+        stats = TransformationStatistics("amount")
+
+        @udf(float, mode="pandas")
+        def scale(amount, statistics=stats):
+            return (amount - statistics.amount.mean) / statistics.amount.std_dev
+
+        return TransformationFunction(
+            featurestore_id=99,
+            hopsworks_udf=scale,
+            version=version,
+            transformation_type=TransformationType.MODEL_DEPENDENT,
+        )
+
+    def test_replay_runs_the_attached_function_with_the_training_statistics(
+        self, mocker, backend_fixtures
+    ):
+        tf = self._scaler()
+        fv = self._view_with(mocker, backend_fixtures, tf)
+        fds = [feature_descriptive_statistics.FeatureDescriptiveStatistics("amount")]
+        stats = mocker.patch.object(
+            fv,
+            "get_training_dataset_statistics",
+            return_value=mocker.Mock(feature_descriptive_statistics=fds),
+        )
+        executor = mocker.Mock()
+        executor.execute.return_value = pd.Series([0.5, 1.5])
+        mocker.patch.object(tf, "executor", return_value=executor)
+        data = pd.DataFrame({"amount": [10.0, 20.0], "other": [1, 2]})
+
+        result = fv.replay("scale", data, training_dataset_version=3)
+
+        stats.assert_called_once_with(
+            training_dataset_version=3,
+            before_transformation=True,
+            feature_names=["amount"],
+        )
+        tf.executor.assert_called_once_with(statistics=fds, context=None)
+        pd.testing.assert_series_equal(
+            executor.execute.call_args.args[0], data["amount"]
+        )
+        assert list(result.columns) == list(tf.output_column_names)
+        assert result.iloc[:, 0].tolist() == [0.5, 1.5]
+
+    def test_replay_rejects_unattached_functions_and_missing_inputs(
+        self, mocker, backend_fixtures
+    ):
+        tf = self._scaler()
+        fv = self._view_with(mocker, backend_fixtures, tf)
+
+        with pytest.raises(ValueError, match="not attached"):
+            fv.replay("haversine", pd.DataFrame({"amount": [1.0]}))
+        with pytest.raises(ValueError, match="missing \\['amount'\\]"):
+            fv.replay(
+                "scale", pd.DataFrame({"other": [1.0]}), training_dataset_version=1
+            )
+
+    def test_replay_can_run_another_registered_version(self, mocker, backend_fixtures):
+        tf = self._scaler(version=1)
+        other = self._scaler(version=2)
+        fv = self._view_with(mocker, backend_fixtures, tf)
+        fetch = mocker.patch.object(
+            fv._transformation_function_engine,
+            "_get_transformation_fn",
+            return_value=other,
+        )
+        mocker.patch.object(
+            fv,
+            "get_training_dataset_statistics",
+            return_value=mocker.Mock(feature_descriptive_statistics=[]),
+        )
+        executor = mocker.Mock()
+        executor.execute.return_value = pd.DataFrame({"scale_amount_": [1.0]})
+        mocker.patch.object(other, "executor", return_value=executor)
+        attached_executor = mocker.patch.object(tf, "executor")
+
+        fv.replay(
+            "scale",
+            pd.DataFrame({"amount": [10.0]}),
+            training_dataset_version=1,
+            version=2,
+        )
+
+        fetch.assert_called_once_with("scale", version=2)
+        attached_executor.assert_not_called()
+        executor.execute.assert_called_once()
+
+    def test_replay_falls_back_to_the_latest_training_dataset(
+        self, mocker, backend_fixtures
+    ):
+        tf = self._scaler()
+        fv = self._view_with(mocker, backend_fixtures, tf)
+        latest = mocker.patch.object(
+            fv._feature_view_engine,
+            "_get_latest_training_dataset_version",
+            return_value=7,
+        )
+        stats = mocker.patch.object(
+            fv,
+            "get_training_dataset_statistics",
+            return_value=mocker.Mock(feature_descriptive_statistics=[]),
+        )
+        executor = mocker.Mock()
+        executor.execute.return_value = pd.Series([1.0])
+        mocker.patch.object(tf, "executor", return_value=executor)
+
+        fv.replay("scale", pd.DataFrame({"amount": [10.0]}))
+
+        latest.assert_called_once_with(fv)
+        assert stats.call_args.kwargs["training_dataset_version"] == 7

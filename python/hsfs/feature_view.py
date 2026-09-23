@@ -6458,6 +6458,103 @@ class FeatureView:
         return self._transformation_functions
 
     @public
+    def replay(
+        self,
+        transformation_function: str | TransformationFunction,
+        data: pd.DataFrame,
+        training_dataset_version: int | None = None,
+        version: int | None = None,
+        transformation_context: dict[str, Any] | None = None,
+    ) -> pd.DataFrame:
+        """Re-run one transformation of this feature view over the given inputs, exactly as it was applied.
+
+        The function runs with the training-dataset statistics of the given version (its fitted parameters) and, when `version` names another registered version of the same function, with that code instead of the attached one.
+        This is how a stored input can be re-evaluated on demand, and how the output of one code or parameter version can be compared with another over the same rows.
+
+        Example:
+            ```python
+            inputs = fg.read(start_time="2024-01-01 00:00:00", end_time="2024-01-01 01:00:00")
+            scaled_v1 = fv.replay("standard_scaler", inputs, training_dataset_version=1)
+            scaled_v2 = fv.replay("standard_scaler", inputs, training_dataset_version=2)
+            ```
+
+        Parameters:
+            transformation_function: The attached function to replay, by name or object.
+            data: The inputs, with one column per feature the function reads.
+            training_dataset_version: The training dataset whose statistics parametrise the function; the version the feature view serves when `None`.
+            version: A registered version of the function to run instead of the attached one; the attached one when `None`.
+            transformation_context: Context variables the function reads, if any.
+
+        Returns:
+            A dataframe with the function's output columns.
+
+        Raises:
+            ValueError: If the function is not attached to this feature view, or `data` lacks one of its inputs.
+            hopsworks.client.exceptions.RestAPIError: If the backend encounters an error when handling the request.
+        """
+        attached = {
+            tf.hopsworks_udf.function_name: tf
+            for tf in list(self._transformation_functions or [])
+            + list(self._on_demand_transformation_functions or [])
+        }
+        name = (
+            transformation_function
+            if isinstance(transformation_function, str)
+            else transformation_function.hopsworks_udf.function_name
+        )
+        if name not in attached:
+            raise ValueError(
+                f"Transformation function {name!r} is not attached to feature view "
+                f"{self.name} v{self.version}; attached: {sorted(attached)}."
+            )
+        tf = attached[name]
+        if version is not None and version != tf.version:
+            # another registered version of the same function, run as if it were attached
+            other = self._transformation_function_engine._get_transformation_fn(
+                name, version=version
+            )
+            other.transformation_type = tf.transformation_type
+            other.hopsworks_udf.feature_name_prefix = (
+                tf.hopsworks_udf.feature_name_prefix
+            )
+            tf = other
+
+        inputs = list(tf.hopsworks_udf.transformation_features)
+        missing = [feature for feature in inputs if feature not in data.columns]
+        if missing:
+            raise ValueError(
+                f"Replay of {name!r} needs the input columns {inputs}; missing {missing}."
+            )
+
+        statistics = None
+        if tf.hopsworks_udf.statistics_required:
+            td_version = training_dataset_version
+            if td_version is None:
+                td_version = self._get_training_dataset_version_for_replay()
+            statistics = self.get_training_dataset_statistics(
+                training_dataset_version=td_version,
+                before_transformation=True,
+                feature_names=inputs,
+            ).feature_descriptive_statistics
+
+        executor = tf.executor(statistics=statistics, context=transformation_context)
+        outputs = executor.execute(*[data[feature] for feature in inputs])
+        if isinstance(outputs, pd.DataFrame):
+            frame = outputs
+        else:
+            frame = pd.DataFrame({tf.output_column_names[0]: outputs})
+        frame.columns = list(tf.output_column_names)[: len(frame.columns)]
+        return frame
+
+    def _get_training_dataset_version_for_replay(self) -> int:
+        """The training dataset version the feature view was initialised to serve, or its latest one."""
+        # the servers are read as they are: initialising one here would open a store connection
+        for server in (self.__batch_scoring_server, self.__vector_server):
+            if server is not None and server.training_dataset_version is not None:
+                return server.training_dataset_version
+        return self._feature_view_engine._get_latest_training_dataset_version(self)
+
+    @public
     def applied_code_versions(self) -> dict[str, str]:
         """The code identity of every transformation this feature view applies.
 

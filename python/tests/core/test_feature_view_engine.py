@@ -5144,3 +5144,34 @@ class TestEnableFeatureLoggingServingRevision:
         )
 
         assert self._declared(enable) == ["serving_revision"]
+
+
+class TestLatestTrainingDatasetVersion:
+    def test_latest_version(self, mocker):
+        mocker.patch("hopsworks_common.client._get_instance")
+        fv_engine = feature_view_engine.FeatureViewEngine(feature_store_id=99)
+        mocker.patch.object(
+            fv_engine._feature_view_api,
+            "_get_training_datasets",
+            return_value=[
+                MagicMock(version=2),
+                MagicMock(version=5),
+                MagicMock(version=3),
+            ],
+        )
+        fv = MagicMock()
+        fv.name, fv.version = "fv", 1
+
+        assert fv_engine._get_latest_training_dataset_version(fv) == 5
+
+    def test_no_training_dataset_fails_loudly(self, mocker):
+        mocker.patch("hopsworks_common.client._get_instance")
+        fv_engine = feature_view_engine.FeatureViewEngine(feature_store_id=99)
+        mocker.patch.object(
+            fv_engine._feature_view_api, "_get_training_datasets", return_value=[]
+        )
+        fv = MagicMock()
+        fv.name, fv.version = "fv", 1
+
+        with pytest.raises(FeatureStoreException, match="no training dataset"):
+            fv_engine._get_latest_training_dataset_version(fv)

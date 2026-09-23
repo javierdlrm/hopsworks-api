@@ -425,3 +425,46 @@ class TestFeatureDescriptiveStatistics:
         result = fds.to_dict()
 
         assert result["percentiles"] == {"25%": 0.4, "50%": None, "75%": 0.86}
+
+
+class TestFeatureDescriptiveStatisticsSummaries:
+    def test_numeric_histogram_and_kll_are_exposed(self):
+        fds = FeatureDescriptiveStatistics(
+            feature_name="amount",
+            extended_statistics={
+                "histogram": [
+                    {"low_value": 0.0, "high_value": 1.0, "count": 5},
+                    {"low_value": 1.0, "high_value": 2.0, "count": 5},
+                ],
+                "kll": {
+                    "kllFormat": "datasketches-native-v1",
+                    "bytes": "AA==",
+                    "buckets": [],
+                },
+            },
+        )
+
+        assert len(fds.histogram) == 2
+        assert fds.kll["kllFormat"] == "datasketches-native-v1"
+        assert fds.value_counts is None  # numeric buckets carry no value
+
+    def test_categorical_histogram_gives_value_counts(self):
+        fds = FeatureDescriptiveStatistics(
+            feature_name="country",
+            extended_statistics={
+                "histogram": [
+                    {"value": "SE", "count": 7, "ratio": 0.7},
+                    {"value": "ES", "count": 3, "ratio": 0.3},
+                ]
+            },
+        )
+
+        assert fds.value_counts == {"SE": 7, "ES": 3}
+        assert fds.kll is None
+
+    def test_without_extended_statistics(self):
+        fds = FeatureDescriptiveStatistics(feature_name="amount", count=0)
+
+        assert fds.histogram is None
+        assert fds.kll is None
+        assert fds.value_counts is None
