@@ -649,6 +649,19 @@ class Engine:
         # No op to avoid query failure
         pass
 
+    def _read_with_commit_time(
+        self,
+        feature_group,
+        start_commit_time,
+        end_commit_time,
+        read_options,
+        dataframe_type,
+    ):
+        raise FeatureStoreException(
+            "Reading rows with their commit time needs the change data feed, which only the "
+            "Spark engine reads. Run this in a Spark environment."
+        )
+
     def _register_delta_temporary_table(
         self,
         delta_fg_alias,

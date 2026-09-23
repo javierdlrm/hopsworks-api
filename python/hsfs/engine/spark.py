@@ -414,6 +414,31 @@ class Engine:
             read_options,
         )
 
+    def _read_with_commit_time(
+        self,
+        feature_group,
+        start_commit_time: int | None,
+        end_commit_time: int | None,
+        read_options: dict[str, Any] | None,
+        dataframe_type: str,
+    ):
+        """Rows of a Delta feature group committed in a commit-time window, with their commit time and version."""
+        delta_engine_instance = delta_engine.DeltaEngine(
+            feature_store_id=feature_group.feature_store_id,
+            feature_store_name=feature_group.feature_store_name,
+            feature_group=feature_group,
+            spark_session=self._spark_session,
+            spark_context=self._spark_context,
+        )
+        return self._return_dataframe_type(
+            delta_engine_instance._read_with_commit_time(
+                start_commit_time=start_commit_time,
+                end_commit_time=end_commit_time,
+                read_options=read_options,
+            ),
+            dataframe_type,
+        )
+
     def _register_delta_temporary_table(
         self,
         delta_fg_alias: hudi_feature_group_alias.HudiFeatureGroupAlias,

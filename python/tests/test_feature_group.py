@@ -2957,3 +2957,45 @@ class TestFeatureGroupAllowedLateness:
 
         assert fg.watermark() is None
 
+
+class TestFeatureGroupCommitTimeRead:
+    def test_read_with_commit_time_needs_a_delta_feature_group(self, backend_fixtures):
+        json = dict(backend_fixtures["feature_group"]["get"]["response"])
+        json["timeTravelFormat"] = "HUDI"
+        fg = feature_group.FeatureGroup.from_response_json(json)
+
+        with pytest.raises(FeatureStoreException, match="Delta change data feed"):
+            fg.read_with_commit_time()
+
+    def test_read_with_commit_time_delegates_to_the_engine(
+        self, mocker, backend_fixtures
+    ):
+        json = dict(backend_fixtures["feature_group"]["get"]["response"])
+        json["timeTravelFormat"] = "DELTA"
+        fg = feature_group.FeatureGroup.from_response_json(json)
+        engine_instance = mocker.Mock()
+        mocker.patch("hsfs.engine._get_instance", return_value=engine_instance)
+
+        result = fg.read_with_commit_time(
+            start_commit_time="2024-01-01 00:00:00", end_commit_time=1704070800000
+        )
+
+        engine_instance._read_with_commit_time.assert_called_once_with(
+            fg,
+            start_commit_time=1704067200000,
+            end_commit_time=1704070800000,
+            read_options=None,
+            dataframe_type="default",
+        )
+        assert result is engine_instance._read_with_commit_time.return_value
+
+    def test_computation_path_is_a_tag(self, mocker, backend_fixtures):
+        json = backend_fixtures["feature_group"]["get"]["response"]
+        fg = feature_group.FeatureGroup.from_response_json(json)
+        add_tag = mocker.patch.object(fg, "add_tag")
+        mocker.patch.object(fg, "get_tag", return_value="backfill")
+
+        fg.set_computation_path("backfill")
+
+        add_tag.assert_called_once_with("computation_path", "backfill")
+        assert fg.get_computation_path() == "backfill"

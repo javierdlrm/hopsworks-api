@@ -10208,3 +10208,17 @@ class TestPython:
                 self._get_val_multi(result, {"user_id": 1, "item_id": 10}, "val")
                 == "new"
             )
+
+
+class TestReadWithCommitTimeOnPython:
+    def test_python_engine_refuses_commit_time_reads(self):
+        from hopsworks_common.client.exceptions import FeatureStoreException
+
+        with pytest.raises(FeatureStoreException, match="Spark engine"):
+            python.Engine()._read_with_commit_time(
+                feature_group=None,
+                start_commit_time=None,
+                end_commit_time=None,
+                read_options=None,
+                dataframe_type="default",
+            )
