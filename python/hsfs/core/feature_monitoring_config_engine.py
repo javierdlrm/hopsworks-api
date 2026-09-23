@@ -462,16 +462,31 @@ class FeatureMonitoringConfigEngine:
     def _trigger_monitoring_job(
         self,
         job_name: str,
+        start_event_time: int | datetime | date | str | None = None,
+        end_event_time: int | datetime | date | str | None = None,
     ) -> Job:
         """Make a REST call to start an execution of the monitoring job.
 
         Parameters:
             job_name: Name of the job to trigger.
+            start_event_time: optional explicit detection window start (event time) for this run.
+            end_event_time: optional explicit detection window end (event time) for this run.
 
         Returns:
             Job object.
         """
-        self._job_api.launch(name=job_name)
+        args = None
+        if start_event_time is not None and end_event_time is not None:
+            # An explicit execution argument string replaces the job's default arguments,
+            # so the default ones (`-op run_fm -path ...`) are repeated in front of the bounds.
+            job = self._job_api.get_job(name=job_name)
+            default_args = (job.config or {}).get("defaultArgs") or ""
+            args = (
+                f"{default_args} -start_event_time "
+                f"{util._convert_event_time_to_timestamp(start_event_time)}"
+                f" -end_event_time {util._convert_event_time_to_timestamp(end_event_time)}"
+            ).strip()
+        self._job_api.launch(name=job_name, args=args)
 
         return self._job_api.get_job(name=job_name)
 
@@ -562,6 +577,7 @@ class FeatureMonitoringConfigEngine:
         entity: feature_group.FeatureGroup | feature_view.FeatureView,
         config_name: str,
         end_commit_time: int | None = None,
+        detection_window_override: tuple[int, int] | None = None,
     ) -> FeatureMonitoringResult:
         """Main function used by the job to actually perform the monitoring.
 
@@ -572,6 +588,10 @@ class FeatureMonitoringConfigEngine:
                 job (ingestion-triggered configs only). When provided, the detection window
                 end time is pinned to this commit so the resulting Statistics row records
                 the correct ``window_end_commit_time``.
+            detection_window_override: optional explicit `(start, end)` event-time bounds in
+                milliseconds for the detection window of this run only (`run_once(...)` with
+                bounds). The config must declare an `event_time` feature; the reference window
+                is unchanged.
 
         Returns:
             A list of result object describing the outcome of the monitoring.
@@ -580,6 +600,22 @@ class FeatureMonitoringConfigEngine:
 
         assert config is not None, "Feature monitoring config not found."
         feature_names = config.get_feature_names()
+
+        detection_window_config = config.detection_window_config
+        if detection_window_override is not None:
+            if config.event_time is None:
+                raise FeatureStoreException(
+                    f"Feature monitoring config '{config_name}' has no event_time feature; "
+                    "explicit event-time bounds need one."
+                )
+            from hsfs.core import monitoring_window_config as _mwc_override
+
+            detection_window_config = _mwc_override.MonitoringWindowConfig(
+                window_config_type=_mwc_override.WindowConfigType.EVENT_TIME_RANGE,
+                start_event_time=detection_window_override[0],
+                end_event_time=detection_window_override[1],
+                row_percentage=config.detection_window_config.row_percentage,
+            )
 
         if config.trigger_type == fmc.TriggerType.INGESTION:
             # Ingestion-triggered configs: read flags from the FG's statistics_config
@@ -734,19 +770,23 @@ class FeatureMonitoringConfigEngine:
                 FeatureDescriptiveStatistics(feature_name=f, count=0)
                 for f in feature_names
             ]
+            detection_window_bounds = None
         else:
             try:
-                detection_statistics = (
-                    self._monitoring_window_config_engine._run_single_window_monitoring(
-                        entity=entity,
-                        monitoring_window_config=config.detection_window_config,
-                        feature_names=feature_names,
-                        profile_flags=profile_flags,
-                        end_commit_time_override=end_commit_time,
-                        model_filter=model_filter,
-                        event_time_feature=event_time_feature,
-                    )
+                (
+                    detection_statistics,
+                    detection_window_start,
+                    detection_window_end,
+                ) = self._monitoring_window_config_engine._run_single_window_monitoring_with_bounds(
+                    entity=entity,
+                    monitoring_window_config=detection_window_config,
+                    feature_names=feature_names,
+                    profile_flags=profile_flags,
+                    end_commit_time_override=end_commit_time,
+                    model_filter=model_filter,
+                    event_time_feature=event_time_feature,
                 )
+                detection_window_bounds = (detection_window_start, detection_window_end)
             except RestAPIError as e:
                 if (
                     e.error_code
@@ -761,10 +801,12 @@ class FeatureMonitoringConfigEngine:
                         FeatureDescriptiveStatistics(feature_name=f, count=0)
                         for f in feature_names
                     ]
+                    detection_window_bounds = None
                 else:
                     raise
 
         reference_statistics = None
+        reference_window_bounds = None
         if config.reference_window_config is not None:
             # Apply the model filter to the reference window only when it reads from the
             # same entity (logging FG) as the detection window — i.e. time-based windows.
@@ -817,17 +859,20 @@ class FeatureMonitoringConfigEngine:
                     version=config.feature_view_version,
                 )
             try:
-                reference_statistics = (
-                    self._monitoring_window_config_engine._run_single_window_monitoring(
-                        entity=reference_entity,
-                        monitoring_window_config=config.reference_window_config,
-                        feature_names=feature_names,
-                        profile_flags=profile_flags,
-                        end_commit_time_override=ref_commit_time_override,
-                        model_filter=ref_model_filter,
-                        event_time_feature=event_time_feature,
-                    )
+                (
+                    reference_statistics,
+                    reference_window_start,
+                    reference_window_end,
+                ) = self._monitoring_window_config_engine._run_single_window_monitoring_with_bounds(
+                    entity=reference_entity,
+                    monitoring_window_config=config.reference_window_config,
+                    feature_names=feature_names,
+                    profile_flags=profile_flags,
+                    end_commit_time_override=ref_commit_time_override,
+                    model_filter=ref_model_filter,
+                    event_time_feature=event_time_feature,
                 )
+                reference_window_bounds = (reference_window_start, reference_window_end)
             except RestAPIError as e:
                 if (
                     e.error_code
@@ -850,6 +895,8 @@ class FeatureMonitoringConfigEngine:
             detection_statistics=detection_statistics,
             reference_statistics=reference_statistics,
             detection_window_commit_time=detection_window_commit_time,
+            detection_window_bounds=detection_window_bounds,
+            reference_window_bounds=reference_window_bounds,
         )
 
     def _resolve_event_time_feature(

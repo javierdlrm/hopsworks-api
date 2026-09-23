@@ -154,3 +154,53 @@ class TestFeatureMonitoringResult:
     def assert_sc_result(self, scr):
         assert scr._difference == 0.3
         assert scr._shift_detected is True
+
+
+class TestFeatureMonitoringResultEventTimeBounds:
+    def test_bounds_round_trip_through_json(self):
+        # Arrange
+        response = {
+            "id": 42,
+            "featureMonitoringConfigId": 32,
+            "featureStoreId": 67,
+            "executionId": 123,
+            "monitoringTime": 1676457000000,
+            "emptyDetectionWindow": False,
+            "emptyReferenceWindow": False,
+            "detectionWindowStartEventTime": 1704067200000,
+            "detectionWindowEndEventTime": 1704070800000,
+            "referenceWindowStartEventTime": 1703980800000,
+            "referenceWindowEndEventTime": 1703984400000,
+        }
+
+        # Act
+        result = FeatureMonitoringResult.from_response_json(response)
+        the_dict = result.to_dict()
+
+        # Assert
+        assert result.detection_window_start_event_time == 1704067200000
+        assert result.detection_window_end_event_time == 1704070800000
+        assert result.reference_window_start_event_time == 1703980800000
+        assert result.reference_window_end_event_time == 1703984400000
+        assert the_dict["detectionWindowStartEventTime"] == 1704067200000
+        assert the_dict["detectionWindowEndEventTime"] == 1704070800000
+        assert the_dict["referenceWindowStartEventTime"] == 1703980800000
+        assert the_dict["referenceWindowEndEventTime"] == 1703984400000
+
+    def test_bounds_default_to_none_and_are_not_serialised(self):
+        # Arrange
+        result = FeatureMonitoringResult(
+            feature_store_id=67,
+            execution_id=123,
+            monitoring_time=1676457000000,
+            feature_monitoring_config_id=32,
+        )
+
+        # Act
+        the_dict = result.to_dict()
+
+        # Assert
+        assert result.detection_window_start_event_time is None
+        assert result.reference_window_end_event_time is None
+        assert "detectionWindowStartEventTime" not in the_dict
+        assert "referenceWindowEndEventTime" not in the_dict

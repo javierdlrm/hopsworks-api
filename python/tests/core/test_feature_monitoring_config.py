@@ -16,7 +16,9 @@
 
 from datetime import datetime, timezone
 
+import pytest
 from hsfs.core import feature_monitoring_config as fmc
+from hsfs.core import monitoring_window_config as mwc
 from hsfs.core.feature_monitoring_config import FeatureMonitoringType
 from hsfs.core.job_schedule import JobSchedule
 from hsfs.core.monitoring_window_config import WindowConfigType
@@ -1315,3 +1317,74 @@ class TestFeatureViewCreateModelMonitoring:
         assert "trainingDatasetId" not in d
         assert "featureViewId" not in d
         assert "enabled" not in d
+
+
+class TestFeatureMonitoringConfigEventTimeRange:
+    def _config(self, backend_fixtures):
+        config_json = backend_fixtures["feature_monitoring_config"][
+            "get_via_feature_group"
+        ]["scheduled_stats_detection_rolling"]["response"]
+        return fmc.FeatureMonitoringConfig.from_response_json(config_json)
+
+    def test_with_detection_window_event_time_range(self, backend_fixtures):
+        # Arrange
+        config = self._config(backend_fixtures)
+
+        # Act
+        config.with_detection_window(
+            start_event_time="2024-01-01 00:00:00",
+            end_event_time="2024-01-01 01:00:00",
+            row_percentage=0.5,
+        )
+
+        # Assert
+        window = config.detection_window_config
+        assert window.window_config_type == mwc.WindowConfigType.EVENT_TIME_RANGE
+        assert window.start_event_time == 1704067200000
+        assert window.end_event_time == 1704070800000
+        assert window.row_percentage == 0.5
+        assert (
+            config.to_dict()["detectionWindowConfig"]["startEventTime"] == 1704067200000
+        )
+
+    def test_with_detection_window_without_bounds_keeps_rolling_and_all_time(
+        self, backend_fixtures
+    ):
+        config = self._config(backend_fixtures)
+        config.with_detection_window(time_offset="1d")
+        assert (
+            config.detection_window_config.window_config_type
+            == mwc.WindowConfigType.ROLLING_TIME
+        )
+        config.with_detection_window()
+        assert (
+            config.detection_window_config.window_config_type
+            == mwc.WindowConfigType.ALL_TIME
+        )
+
+    def test_run_once_requires_both_bounds(self, backend_fixtures):
+        config = self._config(backend_fixtures)
+        with pytest.raises(ValueError, match="given together"):
+            config.run_once(start_event_time="2024-01-01 00:00:00")
+
+    def test_run_once_with_bounds_passes_them_to_the_trigger(
+        self, mocker, backend_fixtures
+    ):
+        # Arrange
+        config = self._config(backend_fixtures)
+        trigger = mocker.patch.object(
+            config._feature_monitoring_config_engine, "_trigger_monitoring_job"
+        )
+
+        # Act
+        config.run_once(
+            start_event_time="2024-01-01 00:00:00",
+            end_event_time="2024-01-01 01:00:00",
+        )
+
+        # Assert
+        trigger.assert_called_once_with(
+            job_name=config.job_name,
+            start_event_time="2024-01-01 00:00:00",
+            end_event_time="2024-01-01 01:00:00",
+        )

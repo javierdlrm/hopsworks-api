@@ -252,12 +252,23 @@ def import_fg(job_conf: dict[Any, Any]) -> None:
 
 
 def run_feature_monitoring(
-    job_conf: dict[str, str], end_commit_time: int | None = None
+    job_conf: dict[str, str],
+    end_commit_time: int | None = None,
+    start_event_time: int | None = None,
+    end_event_time: int | None = None,
 ) -> None:
     """
     Run feature monitoring for a given entity (feature_group or feature_view)
     based on a feature monitoring configuration.
+
+    `start_event_time` / `end_event_time` (epoch millis) run the detection window over
+    that explicit event-time range instead of the configured one, for this run only.
     """
+    if (start_event_time is None) != (end_event_time is None):
+        raise ValueError("start_event_time and end_event_time must be given together")
+    detection_window_override = (
+        (start_event_time, end_event_time) if start_event_time is not None else None
+    )
     feature_store = job_conf.pop("feature_store")
     fs = get_feature_store_handle(feature_store)
 
@@ -289,6 +300,7 @@ def run_feature_monitoring(
             entity=entity,
             config_name=job_conf["config_name"],
             end_commit_time=end_commit_time,
+            detection_window_override=detection_window_override,
         )
     except Exception as e:
         config = monitoring_config_engine._get_feature_monitoring_configs(
@@ -726,6 +738,18 @@ if __name__ == "__main__":
         help="Commit timestamp (ms) that triggered this feature monitoring job",
     )
     parser.add_argument(
+        "-start_event_time",
+        type=int,
+        default=None,
+        help="Explicit detection window start (event time, epoch millis) for this feature monitoring run",
+    )
+    parser.add_argument(
+        "-end_event_time",
+        type=int,
+        default=None,
+        help="Explicit detection window end (event time, epoch millis, exclusive) for this feature monitoring run",
+    )
+    parser.add_argument(
         "-start_commit_time",
         type=int,
         default=None,
@@ -757,7 +781,12 @@ if __name__ == "__main__":
         elif args.op == "import_fg":
             import_fg(job_conf)
         elif args.op == "run_fm":
-            run_feature_monitoring(job_conf, end_commit_time=args.end_commit_time)
+            run_feature_monitoring(
+                job_conf,
+                end_commit_time=args.end_commit_time,
+                start_event_time=args.start_event_time,
+                end_event_time=args.end_event_time,
+            )
         elif args.op == "delta_vacuum_fg":
             delta_vacuum_fg(spark, job_conf)
         elif args.op == "offline_fg_materialization":

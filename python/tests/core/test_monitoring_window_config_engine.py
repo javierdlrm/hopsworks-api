@@ -72,10 +72,15 @@ class TestMonitoringWindowConfigEngine:
             monitoring_window_config_engine._time_range_str_to_time_delta(
                 negative_expression, "window_length"
             )
-        with pytest.raises(ValueError, match=r"window_length"):
-            monitoring_window_config_engine._time_range_str_to_time_delta(
-                just_minutes_expression, "window_length"
-            )
+        just_minutes = monitoring_window_config_engine._time_range_str_to_time_delta(
+            just_minutes_expression
+        )
+        hours_and_minutes = (
+            monitoring_window_config_engine._time_range_str_to_time_delta("1h30m")
+        )
+        all_four = monitoring_window_config_engine._time_range_str_to_time_delta(
+            "1w2d3h4m"
+        )
         with pytest.raises(ValueError, match=r"window_length"):
             monitoring_window_config_engine._time_range_str_to_time_delta(
                 just_seconds_expression, "window_length"
@@ -102,6 +107,54 @@ class TestMonitoringWindowConfigEngine:
         assert just_hours == timedelta(hours=4)
         assert isinstance(just_weeks, timedelta)
         assert just_weeks == timedelta(weeks=5)
+        assert just_minutes == timedelta(minutes=6)
+        assert hours_and_minutes == timedelta(hours=1, minutes=30)
+        assert all_four == timedelta(weeks=1, days=2, hours=3, minutes=4)
+
+    def test_get_window_start_end_times_event_time_range_ignores_anchor_and_clock(self):
+        # Arrange
+        monitoring_window_config_engine = mwce.MonitoringWindowConfigEngine()
+        config = mwc.MonitoringWindowConfig(
+            window_config_type=mwc.WindowConfigType.EVENT_TIME_RANGE,
+            start_event_time=1704067200000,
+            end_event_time=1704070800000,
+        )
+
+        # Act
+        without_anchor = monitoring_window_config_engine._get_window_start_end_times(
+            monitoring_window_config=config
+        )
+        with_anchor = monitoring_window_config_engine._get_window_start_end_times(
+            monitoring_window_config=config, anchor_end_ms=1_800_000_000_000
+        )
+
+        # Assert
+        assert without_anchor == (1704067200000, 1704070800000)
+        assert with_anchor == (1704067200000, 1704070800000)
+
+    def test_build_monitoring_window_config_detects_event_time_range(self):
+        # Arrange
+        monitoring_window_config_engine = mwce.MonitoringWindowConfigEngine()
+
+        # Act
+        config = monitoring_window_config_engine._build_monitoring_window_config(
+            start_event_time="2024-01-01 00:00:00",
+            end_event_time="2024-01-01 01:00:00",
+        )
+
+        # Assert
+        assert config.window_config_type == mwc.WindowConfigType.EVENT_TIME_RANGE
+        assert config.row_percentage == 1.0
+        assert (config.start_event_time, config.end_event_time) == (
+            1704067200000,
+            1704070800000,
+        )
+        with pytest.raises(ValueError, match="no time offset"):
+            monitoring_window_config_engine._build_monitoring_window_config(
+                time_offset="1d",
+                start_event_time="2024-01-01 00:00:00",
+                end_event_time="2024-01-01 01:00:00",
+            )
 
     def test_get_window_start_end_times_all_time(self):
         # Arrange
@@ -1407,3 +1460,67 @@ class TestEntitiesWithoutCommitHistory:
         assert not engine._should_use_merge_path(
             _make_external_fg(backend_fixtures), _make_rolling_window_config(), flags
         )
+
+
+class TestRunSingleWindowMonitoringBounds:
+    def _engine(self, mocker):
+        engine = mwce.MonitoringWindowConfigEngine()
+        mocker.patch.object(engine, "_init_statistics_engine")
+        stats_engine_mock = MagicMock()
+        found_stats = MagicMock()
+        found_stats.feature_descriptive_statistics = [
+            FeatureDescriptiveStatistics(feature_name="amount", count=10)
+        ]
+        stats_engine_mock._get_by_time_window.return_value = found_stats
+        engine._statistics_engine = stats_engine_mock
+        return engine, stats_engine_mock
+
+    def test_event_time_range_window_returns_its_bounds(self, mocker):
+        engine, stats_engine_mock = self._engine(mocker)
+        window_config = mwc.MonitoringWindowConfig(
+            window_config_type=mwc.WindowConfigType.EVENT_TIME_RANGE,
+            start_event_time=1704067200000,
+            end_event_time=1704070800000,
+        )
+
+        fds, start, end = engine._run_single_window_monitoring_with_bounds(
+            entity=_make_hudi_fg("DELTA"),
+            monitoring_window_config=window_config,
+            feature_names=["amount"],
+            event_time_feature=Feature("event_ts", type="timestamp"),
+        )
+
+        assert [f.feature_name for f in fds] == ["amount"]
+        assert (start, end) == (1704067200000, 1704070800000)
+        call_kwargs = stats_engine_mock._get_by_time_window.call_args.kwargs
+        assert call_kwargs["start_event_time"] == 1704067200000
+        assert call_kwargs["end_event_time"] == 1704070800000
+
+    def test_event_time_range_window_needs_an_event_time_feature(self, mocker):
+        engine, _ = self._engine(mocker)
+        window_config = mwc.MonitoringWindowConfig(
+            window_config_type=mwc.WindowConfigType.EVENT_TIME_RANGE,
+            start_event_time=1704067200000,
+            end_event_time=1704070800000,
+        )
+        with pytest.raises(ValueError, match="declare an event_time feature"):
+            engine._run_single_window_monitoring_with_bounds(
+                entity=_make_hudi_fg("DELTA"),
+                monitoring_window_config=window_config,
+                feature_names=["amount"],
+            )
+
+    def test_commit_time_window_reports_no_event_time_bounds(self, mocker):
+        engine, _ = self._engine(mocker)
+        window_config = mwc.MonitoringWindowConfig(
+            window_config_type=mwc.WindowConfigType.ROLLING_TIME,
+            time_offset="1d",
+        )
+
+        _, start, end = engine._run_single_window_monitoring_with_bounds(
+            entity=_make_hudi_fg("DELTA"),
+            monitoring_window_config=window_config,
+            feature_names=["amount"],
+        )
+
+        assert (start, end) == (None, None)

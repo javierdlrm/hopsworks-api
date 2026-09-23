@@ -27,18 +27,20 @@ from hsfs.core import monitoring_window_config_engine
 
 if TYPE_CHECKING:
     import builtins
+    from datetime import date, datetime
 
 
 @public
 class WindowConfigType(str, Enum):
     """Type of the window.
 
-    It can be one of `"ALL_TIME"`, `"ROLLING_TIME"`, or `"TRAINING_DATASET"`.
+    It can be one of `"ALL_TIME"`, `"ROLLING_TIME"`, `"TRAINING_DATASET"` or `"EVENT_TIME_RANGE"`.
     """
 
     ALL_TIME = "ALL_TIME"
     ROLLING_TIME = "ROLLING_TIME"
     TRAINING_DATASET = "TRAINING_DATASET"
+    EVENT_TIME_RANGE = "EVENT_TIME_RANGE"
 
     @classmethod
     def _list_str(cls) -> builtins.list[str]:
@@ -74,8 +76,9 @@ class WindowConfigType(str, Enum):
 class MonitoringWindowConfig:
     """Defines the slice of feature data on which statistics are computed.
 
-    A window is either a rolling-time or all-time range over the feature data, or a
-    reference to a specific training dataset version.
+    A window is either a rolling-time or all-time range over the feature data, an explicit
+    event-time range `[start_event_time, end_event_time)`, or a reference to a specific
+    training dataset version.
     The detection and reference windows of a
     [`FeatureMonitoringConfig`][hsfs.core.feature_monitoring_config.FeatureMonitoringConfig]
     are both expressed as instances of this class.
@@ -91,6 +94,8 @@ class MonitoringWindowConfig:
         window_length: str | None = None,
         training_dataset_version: int | None = None,
         row_percentage: float | None = None,
+        start_event_time: int | datetime | date | str | None = None,
+        end_event_time: int | datetime | date | str | None = None,
         **kwargs,
     ):
         """Configuration to define the slice of data to compute statistics on.
@@ -110,12 +115,18 @@ class MonitoringWindowConfig:
             monitoring_window_config = MonitoringWindowConfig(
                 training_dataset_version=my_training_dataset.version
             )
+
+            ## Explicit event-time range, sliced by the config's event_time feature
+            monitoring_window_config = MonitoringWindowConfig(
+                start_event_time="2024-01-01 00:00:00",
+                end_event_time="2024-01-01 01:00:00",
+            )
             ```
 
         Parameters:
             id: The id of the monitoring window config.
             window_config_type: The type of the monitoring window config.
-                One of `ALL_TIME`, `ROLLING_TIME`, `TRAINING_DATASET`.
+                One of `ALL_TIME`, `ROLLING_TIME`, `TRAINING_DATASET`, `EVENT_TIME_RANGE`.
             time_offset: The time offset from the current time to the start of the window.
                 Only used for `ROLLING_TIME` windows.
             window_length: The length of the time window.
@@ -123,11 +134,17 @@ class MonitoringWindowConfig:
             training_dataset_version: The version of the training dataset to use as reference.
                 Only used for `TRAINING_DATASET` windows.
             row_percentage: The fraction of rows to use when computing statistics [0, 1.0].
-                Only used for `ROLLING_TIME` and `ALL_TIME` windows.
+                Only used for `ROLLING_TIME`, `ALL_TIME` and `EVENT_TIME_RANGE` windows.
+            start_event_time: Inclusive start of the window on the event-time axis.
+                Only used for `EVENT_TIME_RANGE` windows.
+            end_event_time: Exclusive end of the window on the event-time axis.
+                Only used for `EVENT_TIME_RANGE` windows.
 
         Raises:
             AttributeError: If window_config_type is not one of `ALL_TIME`, `ROLLING_TIME`,
-                `TRAINING_DATASET`.
+                `TRAINING_DATASET`, `EVENT_TIME_RANGE`.
+            ValueError: If an `EVENT_TIME_RANGE` window has no bounds or `end_event_time`
+                is not after `start_event_time`.
         """
         self._id = id
         self._window_config_type = None
@@ -135,6 +152,29 @@ class MonitoringWindowConfig:
         self._time_offset = time_offset
         self._window_length = window_length
         self._training_dataset_version = training_dataset_version
+        self._start_event_time = (
+            util._convert_event_time_to_timestamp(start_event_time)
+            if start_event_time is not None
+            else None
+        )
+        self._end_event_time = (
+            util._convert_event_time_to_timestamp(end_event_time)
+            if end_event_time is not None
+            else None
+        )
+        if self.window_config_type == WindowConfigType.EVENT_TIME_RANGE:
+            if self._start_event_time is None or self._end_event_time is None:
+                raise ValueError(
+                    "An EVENT_TIME_RANGE window needs both start_event_time and end_event_time."
+                )
+            if self._end_event_time <= self._start_event_time:
+                raise ValueError(
+                    "end_event_time must be after start_event_time in an EVENT_TIME_RANGE window."
+                )
+        elif self._start_event_time is not None or self._end_event_time is not None:
+            raise ValueError(
+                "start_event_time and end_event_time can only be set for EVENT_TIME_RANGE windows."
+            )
 
         if self.window_config_type in [
             WindowConfigType.TRAINING_DATASET,
@@ -167,6 +207,10 @@ class MonitoringWindowConfig:
             the_dict["rowPercentage"] = self.row_percentage
         elif self._window_config_type == WindowConfigType.TRAINING_DATASET:
             the_dict["trainingDatasetVersion"] = self._training_dataset_version
+        elif self._window_config_type == WindowConfigType.EVENT_TIME_RANGE:
+            the_dict["startEventTime"] = self._start_event_time
+            the_dict["endEventTime"] = self._end_event_time
+            the_dict["rowPercentage"] = self.row_percentage
 
         return the_dict
 
@@ -188,7 +232,7 @@ class MonitoringWindowConfig:
     @public
     @property
     def window_config_type(self) -> WindowConfigType:
-        """Type of the window. It can be one of `ALL_TIME`, `ROLLING_TIME`, `TRAINING_DATASET`."""
+        """Type of the window. It can be one of `ALL_TIME`, `ROLLING_TIME`, `TRAINING_DATASET`, `EVENT_TIME_RANGE`."""
         return self._window_config_type
 
     @window_config_type.setter
@@ -258,8 +302,20 @@ class MonitoringWindowConfig:
 
     @public
     @property
+    def start_event_time(self) -> int | None:
+        """Inclusive start of the window on the event-time axis, in epoch milliseconds. Only used for windows of type `EVENT_TIME_RANGE`."""
+        return self._start_event_time
+
+    @public
+    @property
+    def end_event_time(self) -> int | None:
+        """Exclusive end of the window on the event-time axis, in epoch milliseconds. Only used for windows of type `EVENT_TIME_RANGE`."""
+        return self._end_event_time
+
+    @public
+    @property
     def row_percentage(self) -> float:
-        """The percentage of rows to fetch and compute the statistics on. Only used for windows of type `ROLLING_TIME` and `ALL_TIME`."""
+        """The percentage of rows to fetch and compute the statistics on. Only used for windows of type `ROLLING_TIME`, `ALL_TIME` and `EVENT_TIME_RANGE`."""
         return self._row_percentage
 
     @row_percentage.setter

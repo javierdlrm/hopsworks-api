@@ -136,6 +136,8 @@ class FeatureMonitoringResultEngine:
         start_time: str | int | datetime | date | None = None,
         end_time: str | int | datetime | date | None = None,
         with_statistics: bool = True,
+        start_event_time: str | int | datetime | date | None = None,
+        end_event_time: str | int | datetime | date | None = None,
     ) -> list[FeatureMonitoringResult]:
         """Convenience method to fetch feature monitoring results from an entity.
 
@@ -151,6 +153,8 @@ class FeatureMonitoringResultEngine:
             with_statistics:
                 Whether to include the statistics attached to the results.
                 Set to `False` to fetch only monitoring metadata.
+            start_event_time: Query results whose detection window starts at or after this event time.
+            end_event_time: Query results whose detection window ends at or before this event time.
 
         Returns:
             List of feature monitoring results.
@@ -180,6 +184,8 @@ class FeatureMonitoringResultEngine:
             start_time=start_time,
             end_time=end_time,
             with_statistics=with_statistics,
+            start_event_time=start_event_time,
+            end_event_time=end_event_time,
         )
 
     def _get_latest_by_config_id(
@@ -204,6 +210,8 @@ class FeatureMonitoringResultEngine:
         start_time: str | int | datetime | date | None = None,
         end_time: str | int | datetime | date | None = None,
         with_statistics: bool = False,
+        start_event_time: str | int | datetime | date | None = None,
+        end_event_time: str | int | datetime | date | None = None,
     ) -> list[FeatureMonitoringResult]:
         """Fetch all feature monitoring results by config id.
 
@@ -215,6 +223,8 @@ class FeatureMonitoringResultEngine:
                 Query results with monitoring time less than or equal to end_time.
             with_statistics: bool.
                 Whether to include the statistics attached to the results or not
+            start_event_time: lower bound (inclusive) on the detection window start, event-time axis.
+            end_event_time: upper bound (inclusive) on the detection window end, event-time axis.
 
         Returns:
             List[FeatureMonitoringResult]. List of feature monitoring results.
@@ -223,6 +233,8 @@ class FeatureMonitoringResultEngine:
             start_time=start_time,
             end_time=end_time,
             with_statistics=with_statistics,
+            start_event_time=start_event_time,
+            end_event_time=end_event_time,
         )
 
         return self._feature_monitoring_result_api._get_by_config_id(
@@ -238,6 +250,8 @@ class FeatureMonitoringResultEngine:
         detection_statistics: list[FeatureDescriptiveStatistics],
         reference_statistics: list[FeatureDescriptiveStatistics] | None = None,
         detection_window_commit_time: int | None = None,
+        detection_window_bounds: tuple[int | None, int | None] | None = None,
+        reference_window_bounds: tuple[int | None, int | None] | None = None,
     ) -> FeatureMonitoringResult:
         """Run and upload statistics comparison between detection and reference stats.
 
@@ -249,6 +263,9 @@ class FeatureMonitoringResultEngine:
                 Commit timestamp (ms) to which the detection window was anchored.
                 Passed through to the persisted result for use by the reuse-without-recompute
                 guard on subsequent runs (model-monitoring / logging-FG path only).
+            detection_window_bounds: `(start, end)` of the detection window on the event-time axis,
+                in milliseconds, recorded on the result; `None` when not event-time sliced.
+            reference_window_bounds: the same for the reference window.
 
         Returns:
             Feature monitoring result.
@@ -338,6 +355,8 @@ class FeatureMonitoringResultEngine:
             empty_detection_window=empty_detection_window,
             empty_reference_window=empty_reference_window,
             detection_window_commit_time=detection_window_commit_time,
+            detection_window_bounds=detection_window_bounds,
+            reference_window_bounds=reference_window_bounds,
         )
 
         # save and return
@@ -668,6 +687,8 @@ class FeatureMonitoringResultEngine:
         execution_id: int | None = None,
         job_name: str | None = None,
         detection_window_commit_time: int | None = None,
+        detection_window_bounds: tuple[int | None, int | None] | None = None,
+        reference_window_bounds: tuple[int | None, int | None] | None = None,
     ) -> FeatureMonitoringResult:
         """Build feature monitoring result.
 
@@ -682,10 +703,14 @@ class FeatureMonitoringResultEngine:
             detection_window_commit_time: int or None.
                 Commit timestamp (ms) to which the detection window end was anchored.
                 Set only for model-monitoring configs on logging feature groups.
+            detection_window_bounds: `(start, end)` of the detection window on the event-time axis.
+            reference_window_bounds: `(start, end)` of the reference window on the event-time axis.
 
         Returns:
             FeatureMonitoringResult. Saved Feature monitoring result.
         """
+        detection_start, detection_end = detection_window_bounds or (None, None)
+        reference_start, reference_end = reference_window_bounds or (None, None)
         monitoring_time = round(
             util._convert_event_time_to_timestamp(datetime.now()), -3
         )
@@ -712,6 +737,10 @@ class FeatureMonitoringResultEngine:
             empty_detection_window=empty_detection_window,
             empty_reference_window=empty_reference_window,
             detection_window_commit_time=detection_window_commit_time,
+            detection_window_start_event_time=detection_start,
+            detection_window_end_event_time=detection_end,
+            reference_window_start_event_time=reference_start,
+            reference_window_end_event_time=reference_end,
         )
 
     def _build_feature_statistics_result(
@@ -742,6 +771,8 @@ class FeatureMonitoringResultEngine:
         start_time: str | int | datetime | date | None,
         end_time: str | int | datetime | date | None,
         with_statistics: bool,
+        start_event_time: str | int | datetime | date | None = None,
+        end_event_time: str | int | datetime | date | None = None,
     ) -> dict[str, str | list[str]]:
         """Build query parameters for feature monitoring result API calls.
 
@@ -752,6 +783,8 @@ class FeatureMonitoringResultEngine:
                 Query results with monitoring time less than or equal to end_time.
             with_statistics: bool.
                 Whether to include the statistics attached to the results or not
+            start_event_time: lower bound (inclusive) on the detection window start, event-time axis.
+            end_event_time: upper bound (inclusive) on the detection window end, event-time axis.
 
         Returns:
             Dict[str, Union[str, List[str]]]. Query parameters.
@@ -765,6 +798,16 @@ class FeatureMonitoringResultEngine:
         if end_time:
             timestamp_end_time = util._convert_event_time_to_timestamp(end_time)
             filter_by.append(f"monitoring_time_lte:{timestamp_end_time}")
+        if start_event_time is not None:
+            filter_by.append(
+                "detection_window_start_event_time_gte:"
+                f"{util._convert_event_time_to_timestamp(start_event_time)}"
+            )
+        if end_event_time is not None:
+            filter_by.append(
+                "detection_window_end_event_time_lte:"
+                f"{util._convert_event_time_to_timestamp(end_event_time)}"
+            )
         if len(filter_by) > 0:
             query_params["filter_by"] = filter_by
 

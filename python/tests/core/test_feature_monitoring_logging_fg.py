@@ -424,8 +424,8 @@ class TestRunFeatureMonitoringIdeaD:
         )
         run_single = mocker.patch.object(
             engine._monitoring_window_config_engine,
-            "_run_single_window_monitoring",
-            return_value=[_make_fds()],
+            "_run_single_window_monitoring_with_bounds",
+            return_value=([_make_fds()], None, None),
         )
         mocker.patch.object(
             engine._result_engine,
@@ -470,7 +470,7 @@ class TestRunFeatureMonitoringIdeaD:
         )
         run_single = mocker.patch.object(
             engine._monitoring_window_config_engine,
-            "_run_single_window_monitoring",
+            "_run_single_window_monitoring_with_bounds",
         )
         run_and_save = mocker.patch.object(
             engine._result_engine,
@@ -524,7 +524,7 @@ class TestRunFeatureMonitoringIdeaD:
         # _run_single_window_monitoring must NOT be called
         run_single = mocker.patch.object(
             engine._monitoring_window_config_engine,
-            "_run_single_window_monitoring",
+            "_run_single_window_monitoring_with_bounds",
         )
         save_mock = mocker.patch.object(
             engine._result_engine,
@@ -584,8 +584,8 @@ class TestRunFeatureMonitoringIdeaD:
         )
         run_single = mocker.patch.object(
             engine._monitoring_window_config_engine,
-            "_run_single_window_monitoring",
-            return_value=[_make_fds()],
+            "_run_single_window_monitoring_with_bounds",
+            return_value=([_make_fds()], None, None),
         )
         mocker.patch.object(
             engine._result_engine,
@@ -617,8 +617,8 @@ class TestRunFeatureMonitoringIdeaD:
         )
         run_single = mocker.patch.object(
             engine._monitoring_window_config_engine,
-            "_run_single_window_monitoring",
-            return_value=[_make_fds()],
+            "_run_single_window_monitoring_with_bounds",
+            return_value=([_make_fds()], None, None),
         )
         mocker.patch.object(
             engine._result_engine,
@@ -666,8 +666,8 @@ class TestRunFeatureMonitoringIdeaD:
         )
         run_single = mocker.patch.object(
             engine._monitoring_window_config_engine,
-            "_run_single_window_monitoring",
-            return_value=[_make_fds()],
+            "_run_single_window_monitoring_with_bounds",
+            return_value=([_make_fds()], None, None),
         )
         mocker.patch.object(
             engine._result_engine,
@@ -702,8 +702,8 @@ class TestRunFeatureMonitoringIdeaD:
         )
         mocker.patch.object(
             engine._monitoring_window_config_engine,
-            "_run_single_window_monitoring",
-            return_value=[_make_fds()],
+            "_run_single_window_monitoring_with_bounds",
+            return_value=([_make_fds()], None, None),
         )
         save_comparison = mocker.patch.object(
             engine._result_engine,
@@ -739,8 +739,8 @@ class TestRunFeatureMonitoringIdeaD:
         )
         run_single = mocker.patch.object(
             engine._monitoring_window_config_engine,
-            "_run_single_window_monitoring",
-            return_value=[_make_fds()],
+            "_run_single_window_monitoring_with_bounds",
+            return_value=([_make_fds()], None, None),
         )
         mocker.patch.object(
             engine._result_engine,
@@ -827,8 +827,8 @@ class TestTrainingDatasetReferenceEntity:
         fg, feature_store = self._setup(mocker, engine, config, feature_view)
         run_single = mocker.patch.object(
             engine._monitoring_window_config_engine,
-            "_run_single_window_monitoring",
-            return_value=[_make_fds()],
+            "_run_single_window_monitoring_with_bounds",
+            return_value=([_make_fds()], None, None),
         )
 
         engine._run_feature_monitoring(entity=fg, config_name="cfg")
@@ -851,8 +851,8 @@ class TestTrainingDatasetReferenceEntity:
         fg, feature_store = self._setup(mocker, engine, config)
         run_single = mocker.patch.object(
             engine._monitoring_window_config_engine,
-            "_run_single_window_monitoring",
-            return_value=[_make_fds()],
+            "_run_single_window_monitoring_with_bounds",
+            return_value=([_make_fds()], None, None),
         )
 
         engine._run_feature_monitoring(entity=fg, config_name="cfg")
@@ -874,8 +874,8 @@ class TestTrainingDatasetReferenceEntity:
         fg, feature_store = self._setup(mocker, engine, config)
         mocker.patch.object(
             engine._monitoring_window_config_engine,
-            "_run_single_window_monitoring",
-            return_value=[_make_fds()],
+            "_run_single_window_monitoring_with_bounds",
+            return_value=([_make_fds()], None, None),
         )
 
         with pytest.raises(FeatureStoreException, match="needs a feature view"):
@@ -899,8 +899,8 @@ class TestTrainingDatasetReferenceEntity:
         fg, feature_store = self._setup(mocker, engine, config)
         mocker.patch.object(
             engine._monitoring_window_config_engine,
-            "_run_single_window_monitoring",
-            return_value=[_make_fds()],
+            "_run_single_window_monitoring_with_bounds",
+            return_value=([_make_fds()], None, None),
         )
 
         with pytest.raises(FeatureStoreException, match="needs a feature view"):
