@@ -1177,3 +1177,27 @@ class TestBoundaryCounts:
         mocker.patch.object(s_engine._statistics_api, "_get_all", return_value=None)
 
         assert s_engine._get_boundary_counts(mocker.Mock(), event_time="event_ts") == {}
+
+
+class TestTransformationStatisticsProfile:
+    def test_transformation_fn_statistics_keep_the_histogram_and_the_kll_sketch(
+        self, mocker
+    ):
+        mocker.patch("hopsworks_common.client._get_instance")
+        mocker.patch("hsfs.engine._get_type", return_value="spark")
+        engine_instance = mocker.patch("hsfs.engine._get_instance").return_value
+        engine_instance._profile.return_value = '{"columns": []}'
+        unique_values = mocker.patch(
+            "hsfs.core.statistics_engine.StatisticsEngine._profile_unique_values",
+            return_value='{"columns": []}',
+        )
+        s_engine = statistics_engine.StatisticsEngine(99, "featureview")
+        frame = mocker.Mock()
+        frame.select.return_value.head.return_value = [object()]
+
+        s_engine._profile_transformation_fn_statistics(frame, ["amount"], ["country"])
+
+        engine_instance._profile.assert_called_once_with(
+            frame, ["amount", "country"], False, True, False, kll=True
+        )
+        unique_values.assert_called_once()
