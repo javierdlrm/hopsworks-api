@@ -325,6 +325,32 @@ def delta_vacuum_fg(spark: SparkSession, job_conf: dict[Any, Any]) -> None:
     entity.delta_vacuum()
 
 
+BOUNDARY_COUNT_WINDOW = "1 hour"
+
+
+def _record_boundary_counts(entity, deserialized_df) -> None:
+    """Count the rows read from the topic per hour of event time and add them to the group's boundary counts."""
+    from pyspark.sql.functions import count as spark_count
+    from pyspark.sql.functions import window as spark_window
+
+    rows = (
+        deserialized_df.groupBy(
+            spark_window(col(f"value.{entity.event_time}"), BOUNDARY_COUNT_WINDOW)
+        )
+        .agg(spark_count("*").alias("n"))
+        .collect()
+    )
+    counts = {
+        (
+            int(row["window"]["start"].timestamp() * 1000),
+            int(row["window"]["end"].timestamp() * 1000),
+        ): int(row["n"])
+        for row in rows
+    }
+    if counts:
+        entity.record_boundary_counts(counts, accumulate=True)
+
+
 def offline_fg_materialization(
     spark: SparkSession, job_conf: dict[Any, Any], initial_check_point_string: str
 ) -> None:
@@ -473,6 +499,15 @@ def offline_fg_materialization(
 
     # deserialize dataframe so that it can be properly saved
     deserialized_df = engine._get_instance()._deserialize_from_avro(entity, filtered_df)
+
+    # A feature group that declares its allowed lateness gets the rows counted per hour of event
+    # time before deduplication: the count of what reached the topic for a window, accumulated over
+    # the runs that ingest it, is the boundary against which the window's completeness is judged.
+    if entity.allowed_lateness is not None and entity.event_time:
+        try:
+            _record_boundary_counts(entity, deserialized_df)
+        except Exception as e:  # noqa: BLE001 - counting must never fail the materialization
+            print(f"Could not record boundary counts for {entity.name} v{entity.version}: {e}")
 
     # de-duplicate records
     # timestamp cannot be relied on to order the records in case of duplicates, if they are produced together they would have the same timestamp.

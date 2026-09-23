@@ -130,6 +130,9 @@ class StatisticsApi:
         row_percentage: float | None = None,
         before_transformation: bool | None = None,
         training_dataset_version: int | None = None,
+        start_event_time: int | None = None,
+        end_event_time: int | None = None,
+        event_time: str | None = None,
     ) -> list[statistics.Statistics] | None:
         """Get all statistics of an entity.
 
@@ -142,6 +145,9 @@ class StatisticsApi:
             row_percentage: Percentage of feature values used during statistics computation
             before_transformation: Whether the statistics were computed before transformations or not
             training_dataset_version: Version of the training dataset on which statistics were computed
+            start_event_time: Lower bound (inclusive) on the window start, event-time axis
+            end_event_time: Upper bound (inclusive) on the window end, event-time axis
+            event_time: Name of the feature the windows are sliced by
 
         Returns:
             A list of statistics objects, or `None` if not found.
@@ -158,6 +164,9 @@ class StatisticsApi:
             computation_time=computation_time,
             start_commit_time=start_commit_time,
             end_commit_time=end_commit_time,
+            start_event_time=start_event_time,
+            end_event_time=end_event_time,
+            event_time=event_time,
             filter_eq_times=False,
             feature_names=feature_names,
             row_percentage=row_percentage,

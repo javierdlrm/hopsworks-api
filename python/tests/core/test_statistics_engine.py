@@ -22,6 +22,7 @@ from hsfs import (
     feature,
     feature_group,
     feature_view,
+    statistics,
     statistics_config,
     training_dataset,
 )
@@ -1091,3 +1092,88 @@ class TestStatisticsEngine:
         assert without_uniqueness[0].exact_num_distinct_values is None
         # non-uniqueness metrics are untouched
         assert without_uniqueness[0].num_non_null_values == 4
+
+
+class TestBoundaryCounts:
+    def _engine(self, mocker):
+        mocker.patch("hopsworks_common.client._get_instance")
+        return statistics_engine.StatisticsEngine(99, "featuregroup")
+
+    def _row(self, start, end, count):
+        return statistics.Statistics(
+            computation_time=end,
+            window_start_event_time=start,
+            window_end_event_time=end,
+            event_time="event_ts",
+            boundary_count=count,
+        )
+
+    def test_record_boundary_counts_posts_one_row_per_window(self, mocker):
+        s_engine = self._engine(mocker)
+        post = mocker.patch.object(s_engine._statistics_api, "_post")
+        fg = mocker.Mock()
+
+        s_engine._record_boundary_counts(
+            fg,
+            {(1704067200000, 1704070800000): 3600, (1704070800000, 1704074400000): 12},
+            event_time="event_ts",
+        )
+
+        assert post.call_count == 2
+        first = post.call_args_list[0].kwargs["stats"]
+        assert first.window_start_event_time == 1704067200000
+        assert first.window_end_event_time == 1704070800000
+        assert first.event_time == "event_ts"
+        assert first.boundary_count == 3600
+        assert first.row_percentage == 1.0
+        assert first.feature_descriptive_statistics == []
+        assert post.call_args_list[1].kwargs["stats"].boundary_count == 12
+
+    def test_record_boundary_counts_can_accumulate(self, mocker):
+        s_engine = self._engine(mocker)
+        post = mocker.patch.object(s_engine._statistics_api, "_post")
+        mocker.patch.object(
+            s_engine._statistics_api,
+            "_get",
+            return_value=self._row(1704067200000, 1704070800000, 100),
+        )
+
+        s_engine._record_boundary_counts(
+            mocker.Mock(),
+            {(1704067200000, 1704070800000): 25},
+            event_time="event_ts",
+            accumulate=True,
+        )
+
+        assert post.call_args.kwargs["stats"].boundary_count == 125
+
+    def test_get_boundary_counts_keeps_only_counted_windows(self, mocker):
+        s_engine = self._engine(mocker)
+        get_all = mocker.patch.object(
+            s_engine._statistics_api,
+            "_get_all",
+            return_value=[
+                self._row(1704067200000, 1704070800000, 3600),
+                self._row(1704070800000, 1704074400000, None),
+            ],
+        )
+
+        counts = s_engine._get_boundary_counts(
+            mocker.Mock(),
+            start_event_time=1704067200000,
+            end_event_time=1704074400000,
+            event_time="event_ts",
+        )
+
+        assert counts == {(1704067200000, 1704070800000): 3600}
+        assert get_all.call_args.kwargs == {
+            "start_event_time": 1704067200000,
+            "end_event_time": 1704074400000,
+            "event_time": "event_ts",
+        }
+
+    def test_get_boundary_counts_without_rows(self, mocker):
+        s_engine = self._engine(mocker)
+        mocker.patch.object(s_engine._statistics_api, "_get_all", return_value=None)
+
+        assert s_engine._get_boundary_counts(mocker.Mock(), event_time="event_ts") == {}

@@ -272,3 +272,36 @@ class TestStatistics:
 
         # Assert
         assert s is None
+
+
+class TestStatisticsBoundaryCount:
+    def test_boundary_count_round_trips(self):
+        stats = statistics.Statistics(
+            computation_time=1704070800000,
+            row_percentage=1.0,
+            feature_descriptive_statistics=[],
+            window_start_event_time=1704067200000,
+            window_end_event_time=1704070800000,
+            event_time="event_ts",
+            boundary_count=3600,
+        )
+
+        the_dict = stats.to_dict()
+        restored = statistics.Statistics.from_response_json(
+            {
+                "computationTime": 1704070800000,
+                "rowPercentage": 1.0,
+                "windowStartEventTime": 1704067200000,
+                "windowEndEventTime": 1704070800000,
+                "eventTime": "event_ts",
+                "boundaryCount": 3600,
+            }
+        )
+
+        assert stats.boundary_count == 3600
+        assert the_dict["boundaryCount"] == 3600
+        assert the_dict["featureDescriptiveStatistics"] == []
+        assert restored.boundary_count == 3600
+        assert (
+            "boundaryCount" not in statistics.Statistics(computation_time=1).to_dict()
+        )

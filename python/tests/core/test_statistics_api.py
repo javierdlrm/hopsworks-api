@@ -98,3 +98,34 @@ class TestBuildGetQueryParams:
 
         assert params["sort_by"] == ["computation_time:desc"]
         assert "filter_by" not in params
+
+
+class TestStatisticsApiEventTimeRange:
+    def test_get_all_filters_by_event_time_range(self, mocker):
+        client_mock = mocker.MagicMock()
+        client_mock._send_request.return_value = {"count": 0, "items": []}
+        mocker.patch("hopsworks_common.client._get_instance", return_value=client_mock)
+        fg = mocker.Mock()
+        fg.ENTITY_TYPE = "featuregroups"
+        fg.id = 12
+        s_api = statistics_api.StatisticsApi(
+            feature_store_id=99, entity_type="featuregroups"
+        )
+
+        s_api._get_all(
+            fg,
+            start_event_time=1704067200000,
+            end_event_time=1704074400000,
+            event_time="event_ts",
+        )
+
+        query_params = client_mock._send_request.call_args.args[2]
+        assert query_params["filter_by"] == [
+            "window_end_event_time_ltoeq:1704074400000",
+            "window_start_event_time_gtoeq:1704067200000",
+            "event_time_eq:event_ts",
+        ]
+        assert query_params["sort_by"] == [
+            "window_end_event_time:desc",
+            "window_start_event_time:asc",
+        ]

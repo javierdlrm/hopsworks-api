@@ -453,6 +453,7 @@ class FeatureGroupBase:
         data_source: ds.DataSource | dict[str, Any] | None = None,
         ttl: float | timedelta | None = None,
         ttl_enabled: bool | None = None,
+        allowed_lateness_secs: int | None = None,
         online_disk: bool | None = None,
         sink_enabled: bool | None = False,
         missing_mandatory_tags: list[dict[str, Any]] | None = None,
@@ -475,6 +476,7 @@ class FeatureGroupBase:
         self._alert_api = alerts_api.AlertsApi()
         self.ttl = ttl
         self._ttl_enabled = ttl_enabled if ttl_enabled is not None else ttl is not None
+        self.allowed_lateness = allowed_lateness_secs
         self._sink_enabled = sink_enabled
         self._missing_mandatory_tags = missing_mandatory_tags or []
 
@@ -3442,6 +3444,24 @@ class FeatureGroupBase:
 
     @public
     @property
+    def allowed_lateness(self) -> int | None:
+        """How long, in seconds, rows for an event-time window are still accepted after the window closes, or `None` when undeclared.
+
+        This is the lateness policy of the stream that feeds the group; with it a window whose lateness has passed can be told from one that may still receive rows.
+        """
+        return self._allowed_lateness_secs
+
+    @allowed_lateness.setter
+    def allowed_lateness(self, value: float | timedelta | None) -> None:
+        if value is None:
+            self._allowed_lateness_secs = None
+        elif isinstance(value, timedelta):
+            self._allowed_lateness_secs = int(value.total_seconds())
+        else:
+            self._allowed_lateness_secs = int(value)
+
+    @public
+    @property
     def ttl_enabled(self) -> bool:
         """Get whether TTL (time-to-live) is enabled for this feature group.
 
@@ -3590,6 +3610,7 @@ class FeatureGroup(FeatureGroupBase):
         data_source: ds.DataSource | dict[str, Any] | None = None,
         ttl: float | timedelta | None = None,
         ttl_enabled: bool | None = None,
+        allowed_lateness_secs: int | None = None,
         online_disk: bool | None = None,
         sink_enabled: bool | None = False,
         sink_job_conf: SinkJobConfiguration | dict[str, Any] | None = None,
@@ -3622,6 +3643,7 @@ class FeatureGroup(FeatureGroupBase):
             data_source=data_source,
             ttl=ttl,
             ttl_enabled=ttl_enabled,
+            allowed_lateness_secs=allowed_lateness_secs,
             online_disk=online_disk,
             sink_enabled=sink_enabled,
             missing_mandatory_tags=missing_mandatory_tags,
@@ -5704,6 +5726,122 @@ class FeatureGroup(FeatureGroupBase):
         )
 
     @public
+    def update_allowed_lateness(
+        self, allowed_lateness: float | timedelta
+    ) -> FeatureGroup:
+        """Declare how long rows for an event-time window are still accepted after the window closes.
+
+        This is the allowed lateness of the stream that feeds the group, in seconds or as a `timedelta`.
+        A consumer uses it with [`watermark`][hsfs.feature_group.FeatureGroup.watermark] to tell a closed window from a pending one.
+
+        Parameters:
+            allowed_lateness: The lateness, in seconds or as a `timedelta`.
+
+        Returns:
+            The updated feature group.
+
+        Raises:
+            hopsworks.client.exceptions.RestAPIError: If the backend encounters an error when handling the request.
+        """
+        self.allowed_lateness = allowed_lateness
+        self._feature_group_engine._update_allowed_lateness(
+            self, self._allowed_lateness_secs
+        )
+        return self
+
+    @public
+    def record_boundary_counts(
+        self,
+        counts: dict[
+            tuple[int | str | datetime | date, int | str | datetime | date], int
+        ],
+        event_time: str | None = None,
+        accumulate: bool = False,
+    ) -> None:
+        """Record how many rows reached the ingestion boundary of this feature group per event-time window.
+
+        The count of a window is what the consumer that feeds the group read from its source for the events of that window, before any deduplication or drop.
+        Compared with the rows materialized for the same window it gives the completeness ratio of the window; the counts live on the statistics row of the window and come back with [`get_boundary_counts`][hsfs.feature_group.FeatureGroup.get_boundary_counts].
+
+        Example:
+            ```python
+            fg.record_boundary_counts({
+                ("2024-01-01 00:00:00", "2024-01-01 01:00:00"): 3_600,
+                ("2024-01-01 01:00:00", "2024-01-01 02:00:00"): 3_412,
+            })
+            ```
+
+        Parameters:
+            counts: Row count per half-open `(start, end)` window on the event-time axis.
+            event_time: The event-time feature the windows are sliced by; the feature group's own event-time feature when `None`.
+            accumulate: Add to the count already recorded for a window instead of replacing it, for consumers that ingest a window in several runs.
+
+        Raises:
+            ValueError: If neither `event_time` nor the feature group's event-time feature is set.
+            hopsworks.client.exceptions.RestAPIError: If the backend encounters an error when handling the request.
+        """
+        event_time = event_time or self.event_time
+        if event_time is None:
+            raise ValueError(
+                "Boundary counts are per event-time window: the feature group needs an event-time feature."
+            )
+        windows = {
+            (
+                util._convert_event_time_to_timestamp(start),
+                util._convert_event_time_to_timestamp(end),
+            ): int(count)
+            for (start, end), count in counts.items()
+        }
+        self._statistics_engine._record_boundary_counts(
+            self, windows, event_time=event_time, accumulate=accumulate
+        )
+
+    @public
+    def get_boundary_counts(
+        self,
+        start_event_time: int | str | datetime | date | None = None,
+        end_event_time: int | str | datetime | date | None = None,
+    ) -> dict[tuple[int, int], int]:
+        """The boundary counts recorded per event-time window, see [`record_boundary_counts`][hsfs.feature_group.FeatureGroup.record_boundary_counts].
+
+        Parameters:
+            start_event_time: Only windows starting at or after this time.
+            end_event_time: Only windows ending at or before this time.
+
+        Returns:
+            The count per `(start, end)` window, in epoch milliseconds, for the windows that carry one.
+
+        Raises:
+            hopsworks.client.exceptions.RestAPIError: If the backend encounters an error when handling the request.
+        """
+        return self._statistics_engine._get_boundary_counts(
+            self,
+            start_event_time=util._convert_event_time_to_timestamp(start_event_time)
+            if start_event_time is not None
+            else None,
+            end_event_time=util._convert_event_time_to_timestamp(end_event_time)
+            if end_event_time is not None
+            else None,
+            event_time=self.event_time,
+        )
+
+    @public
+    def watermark(self) -> int | None:
+        """The event time, in epoch milliseconds, up to which this feature group's windows are closed.
+
+        It is the end of the latest event-time window with a boundary count minus the declared [`allowed_lateness`][hsfs.feature_group.FeatureGroup.allowed_lateness]: a window that ends at or before it no longer receives rows, a later one may still.
+        `None` when no boundary count was recorded yet.
+
+        Raises:
+            hopsworks.client.exceptions.RestAPIError: If the backend encounters an error when handling the request.
+        """
+        counts = self.get_boundary_counts()
+        if not counts:
+            return None
+        latest_end = max(end for _, end in counts)
+        return latest_end - (self._allowed_lateness_secs or 0) * 1000
+
+    @public
     def get_statistics_by_commit_window(
         self,
         from_commit_time: str | int | datetime | date | None = None,
@@ -5937,6 +6075,7 @@ class FeatureGroup(FeatureGroupBase):
             ],
             "ttl": self.ttl,
             "ttlEnabled": self._ttl_enabled,
+            "allowedLatenessSecs": self._allowed_lateness_secs,
             "sinkEnabled": self._sink_enabled,
             "onlinePartitionColumns": self._online_partition_columns,
         }

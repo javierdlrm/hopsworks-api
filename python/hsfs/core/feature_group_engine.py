@@ -1123,6 +1123,21 @@ class FeatureGroupEngine(feature_group_base_engine.FeatureGroupBaseEngine):
             return feature_group.columns
         return [c for c in feature_group.columns if c.name not in grain_set]
 
+    def _update_allowed_lateness(
+        self, feature_group: fg.FeatureGroup, allowed_lateness_secs: int
+    ) -> None:
+        """Updates the lateness policy of a feature group.
+
+        Parameters:
+            feature_group: The feature group to update.
+            allowed_lateness_secs: The new allowed lateness, in seconds.
+        """
+        copy_feature_group = fg.FeatureGroup.from_response_json(feature_group.to_dict())
+        copy_feature_group.allowed_lateness = allowed_lateness_secs
+        self._feature_group_api._update_metadata(
+            feature_group, copy_feature_group, "updateMetadata"
+        )
+
     def _update_ttl(
         self,
         feature_group: fg.FeatureGroup,
