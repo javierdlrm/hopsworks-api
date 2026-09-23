@@ -2414,6 +2414,8 @@ class FeatureGroupBase:
         start_time: int | str | datetime | date | None = None,
         end_time: int | str | datetime | date | None = None,
         with_statistics: bool = True,
+        start_event_time: int | str | datetime | date | None = None,
+        end_event_time: int | str | datetime | date | None = None,
     ) -> list[fmr.FeatureMonitoringResult]:
         """Fetch feature monitoring history for a given feature monitoring config.
 
@@ -2445,6 +2447,8 @@ class FeatureGroupBase:
             with_statistics:
                 Whether to include statistics in the feature monitoring history.
                 If `False`, only metadata about the monitoring will be fetched.
+            start_event_time: Only results whose detection window starts at or after this event time.
+            end_event_time: Only results whose detection window ends at or before this event time.
 
         Returns:
             A list of feature monitoring results containing the monitoring metadata as well as the computed statistics for the detection and reference window if requested.
@@ -2466,6 +2470,8 @@ class FeatureGroupBase:
             start_time=start_time,
             end_time=end_time,
             with_statistics=with_statistics,
+            start_event_time=start_event_time,
+            end_event_time=end_event_time,
         )
 
     @public

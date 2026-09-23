@@ -864,3 +864,55 @@ class TestFeatureMonitoringResultEngine:
 
         with pytest.raises(AssertionError):
             result_engine._validate_detection_and_reference_statistics(det, ref)
+
+
+class TestFeatureMonitoringResultEngineEventTimeBounds:
+    def test_build_query_params_event_time_bounds(self):
+        # Arrange
+        result_engine = feature_monitoring_result_engine.FeatureMonitoringResultEngine(
+            feature_store_id=DEFAULT_FEATURE_STORE_ID,
+            feature_group_id=DEFAULT_FEATURE_GROUP_ID,
+        )
+
+        # Act
+        query_params = result_engine._build_query_params(
+            start_time=None,
+            end_time=None,
+            with_statistics=False,
+            start_event_time="2024-01-01 00:00:00",
+            end_event_time=1704070800000,
+        )
+
+        # Assert
+        assert query_params["filter_by"] == [
+            "detection_window_start_event_time_gte:1704067200000",
+            "detection_window_end_event_time_lte:1704070800000",
+        ]
+        assert query_params["sort_by"] == DEFAULT_MONITORING_TIME_SORT_BY
+
+    def test_build_feature_monitoring_result_records_window_bounds(self):
+        # Arrange
+        result_engine = feature_monitoring_result_engine.FeatureMonitoringResultEngine(
+            feature_store_id=DEFAULT_FEATURE_STORE_ID,
+            feature_group_id=DEFAULT_FEATURE_GROUP_ID,
+        )
+
+        # Act
+        result = result_engine._build_feature_monitoring_result(
+            feature_monitoring_config_id=32,
+            feature_statistics_results=[],
+            detection_window_bounds=(1704067200000, 1704070800000),
+            reference_window_bounds=(None, None),
+        )
+        without = result_engine._build_feature_monitoring_result(
+            feature_monitoring_config_id=32,
+            feature_statistics_results=[],
+        )
+
+        # Assert
+        assert result.detection_window_start_event_time == 1704067200000
+        assert result.detection_window_end_event_time == 1704070800000
+        assert result.reference_window_start_event_time is None
+        assert result.reference_window_end_event_time is None
+        assert without.detection_window_start_event_time is None
+        assert without.detection_window_end_event_time is None
