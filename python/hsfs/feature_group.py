@@ -1112,6 +1112,9 @@ class FeatureGroupBase:
     def get_computation_path(self) -> str | None:
         """The declared computation path of this feature group, or `None` when undeclared.
 
+        Returns:
+            The name of the path, or `None`.
+
         Raises:
             hopsworks.client.exceptions.RestAPIError: If the backend encounters an error when handling the request.
         """
@@ -5909,6 +5912,9 @@ class FeatureGroup(FeatureGroupBase):
 
         It is the end of the latest event-time window with a boundary count minus the declared [`allowed_lateness`][hsfs.feature_group.FeatureGroup.allowed_lateness]: a window that ends at or before it no longer receives rows, a later one may still.
         `None` when no boundary count was recorded yet.
+
+        Returns:
+            The watermark in epoch milliseconds, or `None`.
 
         Raises:
             hopsworks.client.exceptions.RestAPIError: If the backend encounters an error when handling the request.
