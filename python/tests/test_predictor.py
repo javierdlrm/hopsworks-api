@@ -82,6 +82,23 @@ class TestPredictor:
 
         assert pred[0].environment == environment["name"]
 
+    def test_artifact_path_uses_the_deployment_version(self, mocker):
+        self._mock_serving_variables(mocker, SERVING_NUM_INSTANCES_NO_LIMIT)
+        p = predictor.Predictor(
+            name="my_model",
+            model_server=PREDICTOR.MODEL_SERVER_PYTHON,
+            model_name="my_model",
+            model_path="/Projects/p/Models/my_model",
+            model_version=2,
+            model_framework=MODEL.FRAMEWORK_SKLEARN,
+            version=5,
+        )
+
+        assert (
+            p.artifact_path
+            == "/Projects/p/Models/my_model/2/Artifacts/5/my_model_2_5.zip"
+        )
+
     def test_to_dict_sends_both_environment_fields(self, mocker):
         # predictorEnvironment for a current backend, environmentDTO so an older one
         # still applies it.

@@ -35,6 +35,7 @@ if TYPE_CHECKING:
     from hsml.deployment_logging_config import DeploymentLoggingConfig
     from hsml.deployment_schema import DeploymentSchema
     from hsml.deployment_tracing_config import DeploymentTracingConfig
+    from hsml.deployment_version import DeploymentVersion
     from hsml.inference_batcher import InferenceBatcher
     from hsml.inference_logger import InferenceLogger
     from hsml.predictor_state import PredictorState
@@ -105,18 +106,75 @@ class Deployment:
 
     @public
     @usage._method_logger
-    def save(self, await_update: int | None = 600):
+    def save(self, await_update: int | None = 600, new_version: bool = False) -> None:
         """Persist this deployment including the predictor and metadata to Model Serving.
+
+        On an existing deployment the active version is edited in place by default and keeps its number.
+        With `new_version` the configuration is stored as a new version, numbered one above the highest the deployment ever had, and made active.
+        Either way the running instances are restarted only when something changed, so a save without changes is a no-op.
+        Use [`Deployment.restart`][hsml.deployment.Deployment.restart] to restart on purpose.
+
+        Note: What a version holds
+            The predictor and transformer scripts, config file, resources, scaling, environment variables, environments, tracing, feature logging configuration, git source, vLLM settings and the model artifact belong to a version.
+            The API protocol, request batching, inference logging, scheduling configuration and Knative mode do not.
+            They are edited in place whichever way you save, and a rollback does not restore them.
 
         Parameters:
             await_update: If the deployment is running, awaiting time (seconds) for the running instances to be updated.
                           If the running instances are not updated within this timespan, the call to this method returns while
                           the update in the background.
+            new_version: Store this configuration as a new version of the deployment instead of editing the active one.
+
+        Raises:
+            hopsworks.client.exceptions.RestAPIError: In case the backend encounters an issue, including a conflict when the deployment was rolled back or given a new version by someone else since it was read.
+            hopsworks.client.exceptions.ModelServingException: If `new_version` is set on a deployment that has not been created yet, or the backend does not support deployment versions.
+
+        Example: Save as a new version and roll back
+            ```python
+            deployment.predictor.resources.num_instances = 2
+            deployment.save(new_version=True)
+            deployment.rollback(1)
+            ```
+        """
+        self._serving_engine._save(self, await_update, new_version)
+
+    @public
+    @usage._method_logger
+    def get_versions(self) -> list[DeploymentVersion]:
+        """Get every configuration version this deployment has ever had, newest first.
+
+        Returns:
+            One [`DeploymentVersion`][hsml.deployment_version.DeploymentVersion] per version, with `active` set on the one the deployment runs.
 
         Raises:
             hopsworks.client.exceptions.RestAPIError: In case the backend encounters an issue.
         """
-        self._serving_engine._save(self, await_update)
+        return self._serving_api._get_versions(self)
+
+    @public
+    @usage._method_logger
+    def rollback(self, version: int, await_update: int | None = 600) -> None:
+        """Make an earlier version of this deployment the active one again.
+
+        Nothing is copied: the version's files are still where they were, and it keeps its number.
+        This object is updated to the reactivated configuration.
+
+        Warning: Running instances are restarted
+            A running deployment is rolled to the version, so its pods restart and requests fail over during the rollout.
+            The API protocol, request batching, inference logging, scheduling configuration and Knative mode are kept as they are, because they are not part of a version.
+            A version that was edited in place after it was created comes back as edited, not as it was first saved.
+
+        Parameters:
+            version: The version to activate.
+            await_update: If the deployment is running, awaiting time (seconds) for the running instances to be updated.
+                          If the running instances are not updated within this timespan, the call to this method returns while
+                          the update continues in the background.
+
+        Raises:
+            hopsworks.client.exceptions.RestAPIError: In case the backend encounters an issue, including a version the deployment does not have.
+            hopsworks.client.exceptions.ModelServingException: If the deployment is starting, updating or stopping.
+        """
+        self._serving_engine._rollback(self, version, await_update)
 
     @public
     @usage._method_logger
@@ -1037,7 +1095,7 @@ class Deployment:
     @public
     @property
     def version(self):
-        """Version of the deployment."""
+        """Number of the active configuration version of the deployment."""
         return self._predictor.version
 
     @public

@@ -27,6 +27,7 @@ from hsml import (
     decorators,
     deployable_component_logs,
     deployment,
+    deployment_version,
     inference_endpoint,
     predictor_state,
 )
@@ -278,11 +279,14 @@ class ServingApi:
         query_params = {"format": format, "schemaId": schema_id}
         return _client._send_request("GET", path_params, query_params=query_params)
 
-    def _put(self, deployment_instance: deployment.Deployment) -> deployment.Deployment:
+    def _put(
+        self, deployment_instance: deployment.Deployment, new_version: bool = False
+    ) -> deployment.Deployment:
         """Save deployment metadata to model serving.
 
         Parameters:
             deployment_instance: Metadata object of deployment to be saved.
+            new_version: Store the update as a new version of the deployment instead of editing the active one.
 
         Returns:
             Updated metadata object of the deployment.
@@ -290,13 +294,99 @@ class ServingApi:
         _client = client._get_instance()
         path_params = ["project", _client._project_id, "serving"]
         headers = {"content-type": "application/json"}
+        query_params = {"newVersion": "true"} if new_version else None
 
         deployment_instance = deployment_instance.update_from_response_json(
             _client._send_request(
                 "PUT",
                 path_params,
+                query_params=query_params,
                 headers=headers,
                 data=deployment_instance.json(),
+            )
+        )
+        deployment_instance.model_registry_id = _client._project_id
+        deployment_instance.project_name = _client._project_name
+        return deployment_instance
+
+    def _supports_versions(self, deployment_instance: deployment.Deployment) -> bool:
+        """Whether the backend keeps deployment versions; one that predates them has no versions endpoint."""
+        _client = client._get_instance()
+        path_params = [
+            "project",
+            _client._project_id,
+            "serving",
+            deployment_instance.id,
+            "versions",
+        ]
+        try:
+            _client._send_request(
+                "GET", path_params, query_params={"offset": 0, "limit": 1}
+            )
+        except RestAPIError as e:
+            # A deleted deployment is a 404 too, but it carries the deployment-not-found code.
+            if (
+                e.response.status_code == 404
+                and getattr(e, "error_code", None)
+                != deployment.Deployment.NOT_FOUND_ERROR_CODE
+            ):
+                return False
+            raise
+        return True
+
+    def _get_versions(
+        self, deployment_instance: deployment.Deployment
+    ) -> list[deployment_version.DeploymentVersion]:
+        """Get every retained configuration version of a deployment, newest first."""
+        _client = client._get_instance()
+        path_params = [
+            "project",
+            _client._project_id,
+            "serving",
+            deployment_instance.id,
+            "versions",
+        ]
+        versions = []
+        offset = 0
+        limit = 100
+        while True:
+            page = deployment_version.DeploymentVersion.from_response_json(
+                _client._send_request(
+                    "GET", path_params, query_params={"offset": offset, "limit": limit}
+                )
+            )
+            versions.extend(page)
+            offset += limit
+            if len(page) < limit:
+                return versions
+
+    def _rollback(
+        self, deployment_instance: deployment.Deployment, version: int
+    ) -> deployment.Deployment:
+        """Make an earlier version of the deployment the active one.
+
+        Parameters:
+            deployment_instance: Metadata object of the deployment.
+            version: The version to activate.
+
+        Returns:
+            The deployment metadata object, updated from the response.
+        """
+        _client = client._get_instance()
+        path_params = [
+            "project",
+            _client._project_id,
+            "serving",
+            deployment_instance.id,
+            "rollback",
+        ]
+        headers = {"content-type": "application/json"}
+        deployment_instance = deployment_instance.update_from_response_json(
+            _client._send_request(
+                "POST",
+                path_params,
+                headers=headers,
+                data=json.dumps({"version": version}),
             )
         )
         deployment_instance.model_registry_id = _client._project_id
