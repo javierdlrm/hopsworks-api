@@ -6,6 +6,8 @@
         {
           "version": 2,
           "active": true,
+          "candidate": false,
+          "activated": true,
           "created": "2026-09-29T10:00:00Z",
           "createdBy": "Ada Lovelace",
           "updated": null,
@@ -49,6 +51,8 @@
         {
           "version": 1,
           "active": false,
+          "candidate": false,
+          "activated": true,
           "created": "2026-09-28T10:00:00Z",
           "createdBy": "Ada Lovelace",
           "updated": "2026-09-28T12:00:00Z",
@@ -86,6 +90,8 @@
     "response": {
       "version": 3,
       "active": true,
+      "candidate": false,
+      "activated": true,
       "created": "2026-09-29T10:00:00Z",
       "createdBy": "Ada Lovelace",
       "modelName": "m",

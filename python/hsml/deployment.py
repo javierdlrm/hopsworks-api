@@ -62,6 +62,18 @@ def _warn_opensearch_source_deprecated() -> None:
     )
 
 
+_LOG_VARIANTS = ("primary", "candidate")
+
+
+def _validate_variant(variant: str) -> None:
+    if variant not in _LOG_VARIANTS:
+        raise ValueError(
+            "Variant '{}' is not valid. Possible values are '{}'".format(
+                variant, ", ".join(_LOG_VARIANTS)
+            )
+        )
+
+
 @public
 class Deployment:
     NOT_FOUND_ERROR_CODE = 240000
@@ -241,6 +253,9 @@ class Deployment:
             A `predictor` or `transformer` that is passed replaces the one of this object, and the passed predictor object is updated the same way.
             It takes the name, id and version of this deployment, and its Knative mode when it has none.
             Read the candidate from [`Deployment.candidate`][hsml.deployment.Deployment.candidate].
+
+        Note: Telling the variants apart in the logged rows
+            Declare the `deployment_version` extra column of the feature logging to tell the rows logged by the candidate from those of the live version.
 
         Parameters:
             predictor: The predictor of the candidate, for example from `ms.create_predictor(...)`.
@@ -963,7 +978,9 @@ class Deployment:
         )
 
     @public
-    def get_logs(self, component: str = "predictor", tail: int = 10):
+    def get_logs(
+        self, component: str = "predictor", tail: int = 10, variant: str = "primary"
+    ):
         """Prints the deployment logs of the predictor or transformer.
 
         Only the live pods of a running deployment are read. Logs of a
@@ -979,10 +996,13 @@ class Deployment:
         Parameters:
             component: Deployment component to get the logs from (e.g., predictor or transformer).
             tail: Number of most recent lines to retrieve from the logs.
+            variant: `primary` for the live version or `candidate` for the logs of the deployment's A/B candidate.
 
         Raises:
+            ValueError: If `component` or `variant` is not valid.
             hopsworks.client.exceptions.RestAPIError: In case the backend encounters an issue.
         """
+        _validate_variant(variant)
         # validate component
         components = list(util._get_members(DEPLOYABLE_COMPONENT))
         if component not in components:
@@ -992,7 +1012,7 @@ class Deployment:
                 )
             )
 
-        logs = self._serving_engine._get_logs(self, component, tail)
+        logs = self._serving_engine._get_logs(self, component, tail, variant)
         if logs is not None:
             for log in logs:
                 print(log, end="\n\n")
@@ -1006,6 +1026,7 @@ class Deployment:
         since: str | None = None,
         until: str | None = None,
         pod: str | None = None,
+        variant: str = "primary",
     ) -> str:
         r"""Return deployment logs as a single plain-text string.
 
@@ -1027,12 +1048,17 @@ class Deployment:
             until: ISO-8601 upper bound on log timestamp. Ignored on the
                 Kubernetes path.
             pod: Restrict to one instance / container name.
+            variant: ``primary`` for the live version or ``candidate`` for the logs of the deployment's A/B candidate.
 
         Returns:
             The joined logs as plain text. Empty string when there are no
             matching lines; ``==> <instance> <==\\n`` block headers when
             multiple instances are present.
+
+        Raises:
+            ValueError: If `component` or `variant` is not valid.
         """
+        _validate_variant(variant)
         if source == "opensearch":
             _warn_opensearch_source_deprecated()
         components = list(util._get_members(DEPLOYABLE_COMPONENT))
@@ -1050,6 +1076,7 @@ class Deployment:
             since=since,
             until=until,
             pod=pod,
+            variant=variant,
         )
 
     @public
@@ -1062,6 +1089,7 @@ class Deployment:
         timeout: float | None = None,
         stop_on_status: str | None = None,
         pod: str | None = None,
+        variant: str = "primary",
     ) -> Iterator[str]:
         """Yield only newly observed log chunks as plain text.
 
@@ -1093,10 +1121,15 @@ class Deployment:
                 The backend reads the first eight replicas of a component per
                 request, so a deployment scaled beyond that needs the later
                 instances tailed one by one.
+            variant: ``primary`` for the live version or ``candidate`` for the logs of the deployment's A/B candidate.
 
         Yields:
             Plain-text log chunks containing only newly observed content.
+
+        Raises:
+            ValueError: If `component` or `variant` is not valid.
         """
+        _validate_variant(variant)
         if source == "opensearch":
             _warn_opensearch_source_deprecated()
         components = list(util._get_members(DEPLOYABLE_COMPONENT))
@@ -1115,6 +1148,7 @@ class Deployment:
             timeout=timeout,
             stop_on_status=stop_on_status,
             pod=pod,
+            variant=variant,
         )
 
     @public

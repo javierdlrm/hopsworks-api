@@ -159,6 +159,20 @@ deployment.download_artifact_files(version=2)          # files of version 2 (def
 A version holds the predictor, transformer and model artifact settings.
 API protocol, request batching, inference logging, scheduling and Knative mode are not versioned and are kept by a rollback.
 
+A/B testing serves a candidate version next to the live one ([references/ab-testing.md](references/ab-testing.md)):
+
+```python
+candidate = deployment.create_candidate(traffic_percentage=20)  # Standard-mode (knative_mode=False) deployments only; the deployment's edits become the candidate at the next version, traffic set once it runs
+deployment.update_candidate_traffic(50)
+deployment.rollout_candidate()                                  # candidate becomes the active version; two backend steps, the call drives both
+deployment.delete_candidate()                                   # discard; the version number is kept, never reused
+deployment.candidate                                            # None when none
+deployment.get_version(2).candidate, deployment.get_version(2).activated
+deployment.get_logs(variant="candidate")                        # also read_logs / tail_logs
+```
+
+While a candidate exists, save, save as new version, rollback and stop are refused.
+
 ## Robustness and latency
 
 An online inference pipeline is a 24/7 operational service: make it robust to missing request parameters, missing or delayed precomputed features, and slow/failing third-party calls. Log errors to stdout/stderr (Hopsworks ships them to OpenSearch) and design fallbacks (impute from training statistics, use default or cached last-known values, or fall back to a simpler model) rather than letting the request fail. Set low timeouts on any network/feature lookups.
@@ -282,6 +296,8 @@ deployment = model.deploy(
     ...
 )
 ```
+
+With a feature view's logging, declare the `deployment_version` extra column to tell the rows logged by an A/B candidate from those of the live version.
 
 ### Inference Batcher
 

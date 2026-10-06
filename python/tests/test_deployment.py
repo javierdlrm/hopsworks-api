@@ -1252,7 +1252,7 @@ class TestDeployment:
 
         # Assert
         mock_util_get_members.assert_called_once()
-        mock_serving_get_logs.assert_called_once_with(d, "predictor", 10)
+        mock_serving_get_logs.assert_called_once_with(d, "predictor", 10, "primary")
         assert mock_print.call_count == len(mock_logs)
 
     def test_get_logs_component_valid(self, mocker, backend_fixtures):
@@ -1279,7 +1279,7 @@ class TestDeployment:
 
         # Assert
         mock_util_get_members.assert_called_once()
-        mock_serving_get_logs.assert_called_once_with(d, "valid", 10)
+        mock_serving_get_logs.assert_called_once_with(d, "valid", 10, "primary")
         assert mock_print.call_count == len(mock_logs)
 
     def test_get_logs_component_invalid(self, mocker, backend_fixtures):
@@ -1293,6 +1293,42 @@ class TestDeployment:
 
         # Assert
         assert "is not valid" in str(e_info.value)
+
+    def test_get_logs_candidate_variant(self, mocker, backend_fixtures):
+        p = self._get_dummy_predictor(mocker, backend_fixtures)
+        d = deployment.Deployment(predictor=p)
+        mocker.patch("hopsworks_common.util._get_members", return_value=["predictor"])
+        mocker.patch("builtins.print")
+        mock_serving_get_logs = mocker.patch(
+            "hsml.engine.serving_engine.ServingEngine._get_logs", return_value=[]
+        )
+
+        d.get_logs(variant="candidate")
+
+        mock_serving_get_logs.assert_called_once_with(d, "predictor", 10, "candidate")
+
+    def test_log_methods_invalid_variant(self, mocker, backend_fixtures):
+        p = self._get_dummy_predictor(mocker, backend_fixtures)
+        d = deployment.Deployment(predictor=p)
+
+        with pytest.raises(ValueError, match="Variant 'other' is not valid"):
+            d.get_logs(variant="other")
+        with pytest.raises(ValueError, match="Variant 'other' is not valid"):
+            d.read_logs(variant="other")
+        with pytest.raises(ValueError, match="Variant 'other' is not valid"):
+            list(d.tail_logs(variant="other"))
+
+    def test_read_logs_forwards_variant(self, mocker, backend_fixtures):
+        p = self._get_dummy_predictor(mocker, backend_fixtures)
+        d = deployment.Deployment(predictor=p)
+        mocker.patch("hopsworks_common.util._get_members", return_value=["predictor"])
+        mock_api = mocker.patch(
+            "hsml.core.serving_api.ServingApi._get_logs", return_value=[]
+        )
+
+        d.read_logs(variant="candidate")
+
+        assert mock_api.call_args.kwargs["variant"] == "candidate"
 
     def test_get_logs_tail(self, mocker, backend_fixtures):
         # Arrange
@@ -1318,7 +1354,7 @@ class TestDeployment:
 
         # Assert
         mock_util_get_members.assert_called_once()
-        mock_serving_get_logs.assert_called_once_with(d, "predictor", 40)
+        mock_serving_get_logs.assert_called_once_with(d, "predictor", 40, "primary")
         assert mock_print.call_count == len(mock_logs)
 
     def test_get_logs_no_logs(self, mocker, backend_fixtures):
@@ -1340,7 +1376,7 @@ class TestDeployment:
 
         # Assert
         mock_util_get_members.assert_called_once()
-        mock_serving_get_logs.assert_called_once_with(d, "predictor", 10)
+        mock_serving_get_logs.assert_called_once_with(d, "predictor", 10, "primary")
         assert mock_print.call_count == 0
 
     # read_logs / tail_logs (programmatic, never print)

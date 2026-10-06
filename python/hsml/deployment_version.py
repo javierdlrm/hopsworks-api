@@ -56,6 +56,8 @@ class DeploymentVersion:
         self,
         version: int,
         active: bool = False,
+        candidate: bool = False,
+        activated: bool = False,
         created: str | None = None,
         created_by: str | None = None,
         updated: str | None = None,
@@ -91,6 +93,8 @@ class DeploymentVersion:
     ) -> None:
         self._version = version
         self._active = active
+        self._candidate = candidate
+        self._activated = activated
         self._created = created
         self._created_by = created_by
         self._updated = updated
@@ -146,6 +150,8 @@ class DeploymentVersion:
         return {
             "version": self._version,
             "active": self._active,
+            "candidate": self._candidate,
+            "activated": self._activated,
             "created": self._created,
             "createdBy": self._created_by,
             "updated": self._updated,
@@ -205,6 +211,21 @@ class DeploymentVersion:
     def active(self) -> bool:
         """Whether this is the version the deployment currently runs."""
         return self._active
+
+    @public
+    @property
+    def candidate(self) -> bool:
+        """Whether this version is the deployment's current candidate."""
+        return self._candidate
+
+    @public
+    @property
+    def activated(self) -> bool:
+        """Whether this version has ever been the active one.
+
+        A discarded candidate keeps its number but was never activated.
+        """
+        return self._activated
 
     @public
     @property

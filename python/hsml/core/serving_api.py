@@ -861,6 +861,7 @@ class ServingApi:
         until: str | None = None,
         pod: str | None = None,
         timestamps: bool = False,
+        variant: str = "primary",
     ) -> list[deployable_component_logs.DeployableComponentLogs]:
         """Get the logs of a deployment.
 
@@ -884,6 +885,8 @@ class ServingApi:
             pod: Restrict to a single instance / container name.
             timestamps: Prefix each line with the kubelet timestamp, which
                 is what a caller needs to build a resume cursor.
+            variant: ``"primary"`` for the live version or ``"candidate"`` for the A/B candidate.
+                Only ``"candidate"`` is sent, so old backends are unaffected.
 
         Returns:
             Deployment logs.
@@ -911,6 +914,8 @@ class ServingApi:
             query_params["pod"] = pod
         if timestamps:
             query_params["timestamps"] = "true"
+        if variant != "primary":
+            query_params["variant"] = variant
         return deployable_component_logs.DeployableComponentLogs.from_response_json(
             _client._send_request("GET", path_params, query_params=query_params)
         )

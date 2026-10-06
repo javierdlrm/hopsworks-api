@@ -1054,7 +1054,7 @@ class ServingEngine:
         deployment_instance._predictor._set_state(state)
         return state
 
-    def _get_logs(self, deployment_instance, component, tail):
+    def _get_logs(self, deployment_instance, component, tail, variant="primary"):
         state = self._get_state(deployment_instance)
         if state is None:
             return None
@@ -1082,7 +1082,9 @@ class ServingEngine:
             end="\n\n",
         )
 
-        return self._serving_api._get_logs(deployment_instance, component, tail)
+        return self._serving_api._get_logs(
+            deployment_instance, component, tail, variant=variant
+        )
 
     # ----- Programmatic log APIs (read_logs / tail_logs) ---------------------
     # These never print and never short-circuit on deployment state, so a
@@ -1098,6 +1100,7 @@ class ServingEngine:
         since: str | None = None,
         until: str | None = None,
         pod: str | None = None,
+        variant: str = "primary",
     ) -> str:
         """Return deployment logs as a single plain-text string.
 
@@ -1112,6 +1115,7 @@ class ServingEngine:
             since: ISO-8601 lower bound for log timestamps, if any.
             until: ISO-8601 upper bound for log timestamps, if any.
             pod: Specific pod name to read logs for, if any.
+            variant: ``"primary"`` or ``"candidate"``.
 
         Returns:
             All matching log chunks concatenated into a single string.
@@ -1124,6 +1128,7 @@ class ServingEngine:
             since=since,
             until=until,
             pod=pod,
+            variant=variant,
         )
         return self._format_log_chunks(chunks or [])
 
@@ -1137,6 +1142,7 @@ class ServingEngine:
         timeout: float | None = None,
         stop_on_status=None,
         pod: str | None = None,
+        variant: str = "primary",
     ):
         """Yield only newly observed log chunks as plain text.
 
@@ -1168,6 +1174,8 @@ class ServingEngine:
             since: ISO-8601 starting cursor, or ``"now"`` for new-only.
             timeout: Stop after this many seconds, if set.
             stop_on_status: Stop when the deployment status matches this value.
+            pod: Specific pod name to follow, if any.
+            variant: ``"primary"`` or ``"candidate"``.
 
         Yields:
             Log text observed since the previous yield.
@@ -1249,6 +1257,7 @@ class ServingEngine:
                     until=None,
                     pod=pod,
                     timestamps=True,
+                    variant=variant,
                 )
                 or []
             )

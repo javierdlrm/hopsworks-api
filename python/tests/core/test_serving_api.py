@@ -505,6 +505,19 @@ class TestVersioning:
         with pytest.raises(RestAPIError):
             api._supports_versions(_versionable_deployment(mocker))
 
+    def test_get_logs_sends_variant_only_for_the_candidate(self, mocker):
+        api = ServingApi()
+        hopsworks_client = _patch_client(mocker, [])
+        deployment = _versionable_deployment(mocker)
+
+        api._get_logs(deployment, "predictor", 10)
+        _, kwargs = hopsworks_client._send_request.call_args
+        assert "variant" not in kwargs["query_params"]
+
+        api._get_logs(deployment, "predictor", 10, variant="candidate")
+        _, kwargs = hopsworks_client._send_request.call_args
+        assert kwargs["query_params"]["variant"] == "candidate"
+
     def test_put_in_place_sends_no_query_params(self, mocker):
         api = ServingApi()
         hopsworks_client = _patch_client(mocker, {})

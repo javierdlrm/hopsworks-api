@@ -30,6 +30,9 @@ class TestDeploymentVersion:
         assert [v.version for v in versions] == [2, 1]
         assert versions[0].active is True
         assert versions[1].active is False
+        assert versions[0].candidate is False
+        assert versions[0].activated is True
+        assert versions[1].activated is True
         assert versions[0].created_by == "Ada Lovelace"
         assert versions[0].predictor == "predictor.py"
         assert versions[0].transformer == "transformer.py"
@@ -47,6 +50,24 @@ class TestDeploymentVersion:
         assert version.version == 3
         assert version.model_name == "m"
         assert version.model_version == 1
+
+    def test_candidate_and_activated(self):
+        version = DeploymentVersion.from_response_json(
+            {"version": 4, "active": False, "candidate": True, "activated": False}
+        )
+
+        assert version.candidate is True
+        assert version.activated is False
+        assert version.to_dict()["candidate"] is True
+        assert version.to_dict()["activated"] is False
+
+    def test_candidate_and_activated_default_to_false(self):
+        version = DeploymentVersion.from_response_json({"version": 1})
+
+        assert version.candidate is False
+        assert version.activated is False
+        assert version.to_dict()["candidate"] is False
+        assert version.to_dict()["activated"] is False
 
     def test_unknown_keys_are_ignored(self):
         version = DeploymentVersion.from_response_json(
