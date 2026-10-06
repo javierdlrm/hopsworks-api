@@ -32,12 +32,14 @@ if TYPE_CHECKING:
 
     from hsfs.core.feature_monitoring_config import FeatureMonitoringConfig
     from hsml.client.istio.utils.infer_type import InferInput
+    from hsml.deployment_candidate import DeploymentCandidate
     from hsml.deployment_logging_config import DeploymentLoggingConfig
     from hsml.deployment_schema import DeploymentSchema
     from hsml.deployment_tracing_config import DeploymentTracingConfig
     from hsml.deployment_version import DeploymentVersion
     from hsml.inference_batcher import InferenceBatcher
     from hsml.inference_logger import InferenceLogger
+    from hsml.predictor import Predictor
     from hsml.predictor_state import PredictorState
     from hsml.resources import Resources
     from hsml.scaling_config import PredictorScalingConfig
@@ -64,6 +66,10 @@ def _warn_opensearch_source_deprecated() -> None:
 class Deployment:
     NOT_FOUND_ERROR_CODE = 240000
     VERSION_NOT_FOUND_ERROR_CODE = 240052
+    CANDIDATE_EXISTS_ERROR_CODE = 240056
+    CANDIDATE_NOT_FOUND_ERROR_CODE = 240057
+    CANDIDATE_NOT_SUPPORTED_ERROR_CODE = 240058
+    CANDIDATE_NOT_READY_ERROR_CODE = 240059
     """Metadata object representing a deployment in Model Serving."""
 
     def __init__(
@@ -209,6 +215,145 @@ class Deployment:
         if not isinstance(version, int):
             version = version.version
         self._serving_engine._rollback(self, version, await_update)
+
+    @public
+    @usage._method_logger
+    def create_candidate(
+        self,
+        predictor: Predictor | None = None,
+        transformer: Transformer | None = None,
+        traffic_percentage: int = 10,
+        await_running: int | None = 600,
+    ) -> DeploymentCandidate:
+        """Serve a second configuration of this deployment next to the live one, to test it with a share of the traffic.
+
+        A candidate is a configuration, such as a new model version or new resources, that runs next to the live one and receives a share of the requests.
+        It is created from the predictor and transformer of this object, so edit them first or pass new ones.
+        Candidates exist only on running deployments in Standard mode (`knative_mode=False`) served by KServe.
+        A candidate starts with no traffic, and this method then sends it `traffic_percentage` once it is running.
+
+        Warning: The deployment is frozen while a candidate exists
+            While a candidate exists, the backend refuses to save, save as a new version, roll back, stop or change the mode or git source of the deployment.
+            Discard the candidate with [`Deployment.delete_candidate`][hsml.deployment.Deployment.delete_candidate] or promote it with [`Deployment.rollout_candidate`][hsml.deployment.Deployment.rollout_candidate].
+
+        Note: This object reverts to the live configuration
+            The edits of this object become the candidate, and this object is then updated from the response, so it describes the live configuration again.
+            A `predictor` or `transformer` that is passed replaces the one of this object, and the passed predictor object is updated the same way.
+            It takes the name, id and version of this deployment, and its Knative mode when it has none.
+            Read the candidate from [`Deployment.candidate`][hsml.deployment.Deployment.candidate].
+
+        Parameters:
+            predictor: The predictor of the candidate, for example from `ms.create_predictor(...)`.
+                       Defaults to the current predictor of this object, including its edits.
+            transformer: The transformer of the candidate.
+                         Defaults to the transformer of the predictor.
+            traffic_percentage: Share of the traffic, from 0 to 99, to send to the candidate once it is running.
+            await_running: Awaiting time (seconds) for the candidate to start.
+                           If it has not started within this timespan, the call raises, while it starts in the background and gets no traffic.
+                           A value of 0 or None does not wait, and the traffic is then left at 0.
+                           A value below 5 is rounded up to one 5-second poll.
+
+        Returns:
+            The candidate, as reported by the last response.
+
+        Raises:
+            ValueError: If `traffic_percentage` is not an integer from 0 to 99.
+            hopsworks.client.exceptions.RestAPIError: In case the backend encounters an issue, including a candidate that already exists.
+            hopsworks.client.exceptions.ModelServingException: If the deployment is not saved, not running, not in Standard mode, or the backend does not support candidates, or if the candidate fails or has not started within `await_running`.
+
+        Example: Test a new model version with 10% of the traffic
+            ```python
+            predictor = ms.create_predictor(new_model, name=deployment.name, knative_mode=False)
+            candidate = deployment.create_candidate(predictor, traffic_percentage=10)
+            deployment.update_candidate_traffic(50)
+            deployment.rollout_candidate()
+            ```
+        """
+        self._serving_engine._validate_traffic_percentage(traffic_percentage)
+        original = self._predictor
+        if predictor is not None:
+            predictor.name = original.name
+            predictor._id = original._id
+            predictor._version = original._version
+            predictor._created_at = original._created_at
+            predictor._creator = original._creator
+            if predictor.knative_mode is None:
+                predictor.knative_mode = original.knative_mode
+            self._predictor = predictor
+        if transformer is not None:
+            self._predictor.transformer = transformer
+        try:
+            self._serving_engine._create_candidate(self, await_running)
+        except BaseException:
+            if self._predictor is not original and self._predictor._candidate is None:
+                self._predictor = original
+            raise
+        if traffic_percentage > 0 and await_running:
+            self.update_candidate_traffic(traffic_percentage)
+        return self.candidate
+
+    @public
+    @usage._method_logger
+    def update_candidate_traffic(self, traffic_percentage: int) -> None:
+        """Set the share of the traffic that is sent to the candidate.
+
+        The rest of the traffic goes to the live configuration.
+        Setting 0 keeps the candidate running without traffic.
+
+        Parameters:
+            traffic_percentage: Share of the traffic, from 0 to 99.
+
+        Raises:
+            ValueError: If `traffic_percentage` is not an integer from 0 to 99.
+            hopsworks.client.exceptions.RestAPIError: In case the backend encounters an issue, including a deployment without a candidate or a candidate that is not ready or is being rolled out.
+            hopsworks.client.exceptions.ModelServingException: If the backend does not support candidates.
+        """
+        self._serving_engine._update_candidate_traffic(self, traffic_percentage)
+
+    @public
+    @usage._method_logger
+    def rollout_candidate(self, await_update: int | None = 600) -> None:
+        """Promote the candidate to the live configuration of this deployment.
+
+        The rollout takes two steps that this method runs one after the other.
+        First, the live instances are rolled to the configuration of the candidate.
+        Once they are ready, the candidate is retired and the deployment keeps the promoted configuration under the version number of the candidate.
+        This object is updated to the promoted configuration.
+
+        Parameters:
+            await_update: Awaiting time (seconds) for the live instances to be updated and the rollout to finish.
+                          If it has not finished within this timespan, the call raises, while the rollout continues in the background.
+                          Call this method again to finish it.
+                          A value below 5 is rounded up to one 5-second poll.
+
+        Raises:
+            hopsworks.client.exceptions.RestAPIError: In case the backend encounters an issue, including a deployment without a candidate.
+            hopsworks.client.exceptions.ModelServingException: If the deployment is not running, the backend does not support candidates, or the rollout is not finished within `await_update`.
+        """
+        self._serving_engine._rollout_candidate(self, await_update)
+
+    @public
+    @usage._method_logger
+    def delete_candidate(self) -> None:
+        """Discard the candidate and send all the traffic to the live configuration again.
+
+        The version number of the candidate is not reused, so the next candidate gets a higher one.
+        This object is updated from the response.
+
+        Raises:
+            hopsworks.client.exceptions.RestAPIError: In case the backend encounters an issue, including a deployment without a candidate or a rollout in progress.
+            hopsworks.client.exceptions.ModelServingException: If the deployment is not running or the backend does not support candidates.
+        """
+        self._serving_engine._delete_candidate(self)
+
+    @public
+    @property
+    def candidate(self) -> DeploymentCandidate | None:
+        """The candidate of this deployment, or None if it has none.
+
+        It is read from the last response the backend gave for this object, so it is not refreshed on access.
+        """
+        return self._predictor._candidate
 
     @public
     @usage._method_logger

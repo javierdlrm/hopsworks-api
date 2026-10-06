@@ -634,6 +634,137 @@ class ServingEngine:
             allow_updating=True,
         )
 
+    def _require_status(self, deployment_instance, action: str, allow_updating=False):
+        """Refuse an operation on a deployment that is not running, or updating when that is allowed."""
+        state = deployment_instance.get_state()
+        allowed = [PREDICTOR_STATE.STATUS_RUNNING, PREDICTOR_STATE.STATUS_IDLE]
+        if allow_updating:
+            allowed.append(PREDICTOR_STATE.STATUS_UPDATING)
+        if state is not None and state.status not in allowed:
+            raise ModelServingException(
+                f"Cannot {action} while the deployment is {state.status.lower()}; "
+                "it must be running. Check the current status by using `.get_state()`"
+            )
+
+    def _create_candidate(self, deployment_instance, await_running):
+        if deployment_instance.id is None:
+            raise ModelServingException(
+                "Deployment is not created yet. To create the deployment use `.save()`"
+            )
+        # None leaves the mode to the backend, which picks Knative for everything but vLLM.
+        if deployment_instance._predictor.knative_mode is not False:
+            raise ModelServingException(
+                "A/B candidates require a deployment in Standard mode. "
+                "Create the deployment with `knative_mode=False` to use them."
+            )
+        self._require_status(deployment_instance, "create a candidate")
+
+        self._upload_local_serving_files(deployment_instance)
+        self._upload_default_predictor_stub(deployment_instance)
+        self._publish_schema(deployment_instance)
+
+        self._serving_api._create_candidate(deployment_instance)
+        print("Candidate created, waiting for it to start...")
+        if await_running:
+            self._poll_candidate_status(
+                deployment_instance, PREDICTOR_STATE.STATUS_RUNNING, await_running
+            )
+            print("Candidate is running")
+
+    def _get_candidate(self, deployment_instance):
+        candidate = self._serving_api._get_candidate(deployment_instance)
+        deployment_instance._predictor._set_candidate(candidate)
+        return candidate
+
+    def _poll_candidate_status(
+        self, deployment_instance, status: str, await_status: int
+    ):
+        """Wait for the candidate of a deployment to reach a status, raising if it fails or disappears."""
+        if not await_status or await_status <= 0:
+            return None
+        sleep_seconds = 5
+        for _ in range(max(1, math.ceil(await_status / sleep_seconds))):
+            time.sleep(sleep_seconds)
+            candidate = self._get_candidate(deployment_instance)
+            if candidate is None:
+                raise ModelServingException(
+                    "The candidate no longer exists, it was discarded or rolled out"
+                )
+            if candidate.status == status:
+                return candidate
+            if (
+                status == PREDICTOR_STATE.STATUS_RUNNING
+                and candidate.status == PREDICTOR_STATE.STATUS_FAILED
+            ):
+                reason = candidate.condition.reason if candidate.condition else None
+                raise ModelServingException(
+                    reason or "The candidate failed to start, check the server logs"
+                )
+        raise ModelServingException(
+            "The candidate has not reached the desired status within the expected awaiting time. "
+            "Check it by using `.candidate` or set a higher value for await_"
+            + status.lower()
+        )
+
+    @staticmethod
+    def _validate_traffic_percentage(traffic_percentage):
+        if (
+            not isinstance(traffic_percentage, int)
+            or isinstance(traffic_percentage, bool)
+            or not 0 <= traffic_percentage <= 99
+        ):
+            raise ValueError(
+                "traffic_percentage must be an integer between 0 and 99, "
+                f"got {traffic_percentage!r}"
+            )
+
+    def _update_candidate_traffic(self, deployment_instance, traffic_percentage):
+        self._validate_traffic_percentage(traffic_percentage)
+        self._serving_api._update_candidate_traffic(
+            deployment_instance, traffic_percentage
+        )
+
+    def _delete_candidate(self, deployment_instance):
+        self._require_status(
+            deployment_instance, "discard the candidate", allow_updating=True
+        )
+        self._serving_api._delete_candidate(deployment_instance)
+
+    def _rollout_candidate(self, deployment_instance, await_update):
+        self._require_status(
+            deployment_instance, "roll out the candidate", allow_updating=True
+        )
+        budget = await_update or 0
+        deadline = time.monotonic() + budget
+
+        # Step 1 rolls the primary to the candidate's configuration.
+        self._serving_api._rollout_candidate(deployment_instance)
+        print("Rolling the candidate out, applying changes to running instances...")
+        self._poll_deployment_status(
+            deployment_instance, PREDICTOR_STATE.STATUS_RUNNING, budget
+        )
+
+        # Step 2 is refused until the rolled primary is ready, which a poll can race.
+        sleep_seconds = 5
+        while True:
+            try:
+                self._serving_api._rollout_candidate(deployment_instance)
+                break
+            except RestAPIError as e:
+                if (
+                    getattr(e, "error_code", None)
+                    != deployment_instance.CANDIDATE_NOT_READY_ERROR_CODE
+                ):
+                    raise
+                if time.monotonic() + sleep_seconds > deadline:
+                    raise ModelServingException(
+                        "The rolled out configuration is not ready within the expected awaiting time. "
+                        "The rollout continues in the background: call `.rollout_candidate()` again to finish it, "
+                        "or set a higher value for await_update"
+                    ) from e
+                time.sleep(sleep_seconds)
+        print("Candidate rolled out")
+
     def _apply(self, deployment_instance, change, await_update, allow_updating=False):
         """Run a change of the deployment's configuration and wait for the running instances to pick it up."""
         state = deployment_instance.get_state()

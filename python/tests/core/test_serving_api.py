@@ -622,3 +622,117 @@ class TestVersioning:
         assert args[1] == ["project", 1, "serving", 5, "rollback"]
         assert json.loads(kwargs["data"]) == {"version": 2}
         deployment.update_from_response_json.assert_called_once_with(response)
+
+
+class TestCandidates:
+    @staticmethod
+    def _error(mocker, status, body=None):
+        response = mocker.MagicMock()
+        response.status_code = status
+        response.json.return_value = body or {}
+        return RestAPIError("", response)
+
+    def test_create_posts_the_deployment_json_and_applies_the_response(self, mocker):
+        api = ServingApi()
+        response = {"id": 5, "candidate": {"version": 3}}
+        hopsworks_client = _patch_client(mocker, response)
+        deployment = _versionable_deployment(mocker)
+        deployment.json.return_value = '{"name": "d"}'
+
+        api._create_candidate(deployment)
+
+        args, kwargs = hopsworks_client._send_request.call_args
+        assert args[0] == "POST"
+        assert args[1] == ["project", 1, "serving", 5, "candidate"]
+        assert kwargs["data"] == '{"name": "d"}'
+        deployment.update_from_response_json.assert_called_once_with(response)
+
+    def test_update_traffic_patches_the_percentage(self, mocker):
+        api = ServingApi()
+        response = {"id": 5}
+        hopsworks_client = _patch_client(mocker, response)
+        deployment = _versionable_deployment(mocker)
+
+        api._update_candidate_traffic(deployment, 20)
+
+        args, kwargs = hopsworks_client._send_request.call_args
+        assert args[0] == "PATCH"
+        assert args[1] == ["project", 1, "serving", 5, "candidate"]
+        assert json.loads(kwargs["data"]) == {"trafficPercent": 20}
+        deployment.update_from_response_json.assert_called_once_with(response)
+
+    def test_delete_sends_a_delete_without_a_body(self, mocker):
+        api = ServingApi()
+        response = {"id": 5}
+        hopsworks_client = _patch_client(mocker, response)
+        deployment = _versionable_deployment(mocker)
+
+        api._delete_candidate(deployment)
+
+        args, kwargs = hopsworks_client._send_request.call_args
+        assert args[0] == "DELETE"
+        assert args[1] == ["project", 1, "serving", 5, "candidate"]
+        assert "data" not in kwargs
+        deployment.update_from_response_json.assert_called_once_with(response)
+
+    def test_rollout_posts_to_the_rollout_path(self, mocker):
+        api = ServingApi()
+        response = {"id": 5}
+        hopsworks_client = _patch_client(mocker, response)
+        deployment = _versionable_deployment(mocker)
+
+        api._rollout_candidate(deployment)
+
+        args, kwargs = hopsworks_client._send_request.call_args
+        assert args[0] == "POST"
+        assert args[1] == ["project", 1, "serving", 5, "candidate", "rollout"]
+        assert "data" not in kwargs
+        deployment.update_from_response_json.assert_called_once_with(response)
+
+    @pytest.mark.parametrize(
+        "call",
+        [
+            lambda api, d: api._create_candidate(d),
+            lambda api, d: api._update_candidate_traffic(d, 5),
+            lambda api, d: api._delete_candidate(d),
+            lambda api, d: api._rollout_candidate(d),
+        ],
+    )
+    def test_old_backend_raises_a_clear_error(self, mocker, call):
+        api = ServingApi()
+        _patch_client(mocker, self._error(mocker, 404))
+
+        with pytest.raises(ModelServingException, match="newer Hopsworks"):
+            call(api, _versionable_deployment(mocker))
+
+    @pytest.mark.parametrize("error_code", [240000, 240057])
+    def test_backend_not_found_errors_propagate(self, mocker, error_code):
+        api = ServingApi()
+        _patch_client(mocker, self._error(mocker, 404, {"errorCode": error_code}))
+
+        with pytest.raises(RestAPIError):
+            api._delete_candidate(_versionable_deployment(mocker))
+
+    def test_conflict_propagates(self, mocker):
+        api = ServingApi()
+        _patch_client(mocker, self._error(mocker, 409, {"errorCode": 240056}))
+
+        with pytest.raises(RestAPIError):
+            api._create_candidate(_versionable_deployment(mocker))
+
+    def test_get_candidate_reads_it_from_the_deployment(self, mocker):
+        api = ServingApi()
+        _patch_client(
+            mocker, {"id": 5, "candidate": {"version": 3, "trafficPercent": 5}}
+        )
+
+        candidate = api._get_candidate(_versionable_deployment(mocker))
+
+        assert candidate.version == 3
+        assert candidate.traffic_percentage == 5
+
+    def test_get_candidate_is_none_without_one(self, mocker):
+        api = ServingApi()
+        _patch_client(mocker, {"id": 5, "candidate": None})
+
+        assert api._get_candidate(_versionable_deployment(mocker)) is None

@@ -15,6 +15,7 @@
 #
 
 import copy
+import json
 import os
 
 import humps
@@ -489,6 +490,203 @@ class TestDeployment:
         d.rollback(mocker.Mock(version=3), await_update=5)
 
         mock_rollback.assert_called_once_with(d, 3, 5)
+
+    # candidates
+
+    def test_create_candidate_delegates_and_sets_traffic(
+        self, mocker, backend_fixtures
+    ):
+        p = self._get_dummy_predictor(mocker, backend_fixtures)
+        d = deployment.Deployment(predictor=p)
+        mock_create = mocker.patch(
+            "hsml.engine.serving_engine.ServingEngine._create_candidate"
+        )
+        mock_traffic = mocker.patch(
+            "hsml.engine.serving_engine.ServingEngine._update_candidate_traffic"
+        )
+
+        d.create_candidate(traffic_percentage=25, await_running=30)
+
+        mock_create.assert_called_once_with(d, 30)
+        mock_traffic.assert_called_once_with(d, 25)
+
+    def test_create_candidate_leaves_traffic_at_zero_without_waiting(
+        self, mocker, backend_fixtures
+    ):
+        p = self._get_dummy_predictor(mocker, backend_fixtures)
+        d = deployment.Deployment(predictor=p)
+        mocker.patch("hsml.engine.serving_engine.ServingEngine._create_candidate")
+        mock_traffic = mocker.patch(
+            "hsml.engine.serving_engine.ServingEngine._update_candidate_traffic"
+        )
+
+        d.create_candidate(await_running=None)
+        d.create_candidate(traffic_percentage=0)
+
+        mock_traffic.assert_not_called()
+
+    def test_create_candidate_rejects_a_bad_percentage_before_creating(
+        self, mocker, backend_fixtures
+    ):
+        p = self._get_dummy_predictor(mocker, backend_fixtures)
+        d = deployment.Deployment(predictor=p)
+        mock_create = mocker.patch(
+            "hsml.engine.serving_engine.ServingEngine._create_candidate"
+        )
+
+        with pytest.raises(ValueError, match="between 0 and 99"):
+            d.create_candidate(traffic_percentage=100)
+
+        mock_create.assert_not_called()
+
+    def test_create_candidate_with_a_predictor_takes_identity_and_mode(
+        self, mocker, backend_fixtures
+    ):
+        p = self._get_dummy_predictor(mocker, backend_fixtures)
+        p.knative_mode = False
+        d = deployment.Deployment(predictor=p)
+        new = self._get_dummy_predictor(mocker, backend_fixtures)
+        new.name = "other"
+        new._id = None
+        seen = {}
+
+        def create(deployment_instance, await_running):
+            seen["predictor"] = deployment_instance.predictor
+
+        mocker.patch(
+            "hsml.engine.serving_engine.ServingEngine._create_candidate",
+            side_effect=create,
+        )
+
+        d.create_candidate(new, traffic_percentage=0)
+
+        assert seen["predictor"] is new
+        assert new.name == p.name
+        assert new.id == p.id
+        assert new.version == p.version
+        assert new.knative_mode is False
+
+    def test_create_candidate_with_a_transformer_sets_it(
+        self, mocker, backend_fixtures
+    ):
+        p = self._get_dummy_predictor(mocker, backend_fixtures)
+        d = deployment.Deployment(predictor=p)
+        t = mocker.Mock()
+        seen = {}
+
+        def create(deployment_instance, await_running):
+            seen["transformer"] = deployment_instance._predictor._transformer
+
+        mocker.patch(
+            "hsml.engine.serving_engine.ServingEngine._create_candidate",
+            side_effect=create,
+        )
+
+        d.create_candidate(transformer=t, traffic_percentage=0)
+
+        assert seen["transformer"] is t
+
+    def test_create_candidate_restores_the_predictor_when_it_fails(
+        self, mocker, backend_fixtures
+    ):
+        p = self._get_dummy_predictor(mocker, backend_fixtures)
+        d = deployment.Deployment(predictor=p)
+        new = self._get_dummy_predictor(mocker, backend_fixtures)
+        mocker.patch(
+            "hsml.engine.serving_engine.ServingEngine._create_candidate",
+            side_effect=ModelServingException("nope"),
+        )
+
+        with pytest.raises(ModelServingException):
+            d.create_candidate(new)
+
+        assert d.predictor is p
+
+    def test_update_candidate_traffic(self, mocker, backend_fixtures):
+        p = self._get_dummy_predictor(mocker, backend_fixtures)
+        d = deployment.Deployment(predictor=p)
+        mock_traffic = mocker.patch(
+            "hsml.engine.serving_engine.ServingEngine._update_candidate_traffic"
+        )
+
+        d.update_candidate_traffic(40)
+
+        mock_traffic.assert_called_once_with(d, 40)
+
+    def test_rollout_candidate(self, mocker, backend_fixtures):
+        p = self._get_dummy_predictor(mocker, backend_fixtures)
+        d = deployment.Deployment(predictor=p)
+        mock_rollout = mocker.patch(
+            "hsml.engine.serving_engine.ServingEngine._rollout_candidate"
+        )
+
+        d.rollout_candidate(await_update=9)
+        d.rollout_candidate()
+
+        assert mock_rollout.call_args_list == [mocker.call(d, 9), mocker.call(d, 600)]
+
+    def test_delete_candidate(self, mocker, backend_fixtures):
+        p = self._get_dummy_predictor(mocker, backend_fixtures)
+        d = deployment.Deployment(predictor=p)
+        mock_delete = mocker.patch(
+            "hsml.engine.serving_engine.ServingEngine._delete_candidate"
+        )
+
+        d.delete_candidate()
+
+        mock_delete.assert_called_once_with(d)
+
+    def test_candidate_is_parsed_from_the_deployment_json(
+        self, mocker, backend_fixtures
+    ):
+        self._mock_deployment_deserialization(mocker)
+        serving_json = self._serving_json(backend_fixtures, "ns")
+        serving_json["candidate"] = backend_fixtures["deployment_candidate"][
+            "get_candidate_running_test"
+        ]["response"]
+
+        d = deployment.Deployment.from_response_json(serving_json)
+
+        assert d.candidate.version == 3
+        assert d.candidate.traffic_percentage == 20
+        assert d.candidate.status == "Running"
+        assert "candidate" not in d.to_dict()
+        assert "candidate" not in json.loads(d.json())
+
+    def test_candidate_is_none_without_the_key_or_when_null(
+        self, mocker, backend_fixtures
+    ):
+        self._mock_deployment_deserialization(mocker)
+        serving_json = self._serving_json(backend_fixtures, "ns")
+
+        assert deployment.Deployment.from_response_json(serving_json).candidate is None
+
+        serving_json["candidate"] = None
+        assert deployment.Deployment.from_response_json(serving_json).candidate is None
+
+    def test_update_from_response_json_follows_the_candidate(
+        self, mocker, backend_fixtures
+    ):
+        self._mock_deployment_deserialization(mocker)
+        d = deployment.Deployment.from_response_json(
+            self._serving_json(backend_fixtures, "ns")
+        )
+        assert d.candidate is None
+        with_candidate = self._serving_json(backend_fixtures, "ns")
+        with_candidate["candidate"] = backend_fixtures["deployment_candidate"][
+            "get_candidate_running_test"
+        ]["response"]
+
+        d.update_from_response_json(with_candidate)
+        assert d.candidate.version == 3
+
+        d.update_from_response_json(self._serving_json(backend_fixtures, "ns"))
+        assert d.candidate is None
+
+    def test_candidate_of_a_new_deployment_is_none(self, mocker, backend_fixtures):
+        p = self._get_dummy_predictor(mocker, backend_fixtures)
+
+        assert deployment.Deployment(predictor=p).candidate is None
 
     # start
 

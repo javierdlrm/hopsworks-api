@@ -34,6 +34,7 @@ from hopsworks_common.constants import (
 )
 from hsml import deployment
 from hsml.deployable_component import DeployableComponent
+from hsml.deployment_candidate import DeploymentCandidate
 from hsml.deployment_logging_config import DeploymentLoggingConfig
 from hsml.deployment_schema import (
     OUTPUT_FEATURE_VECTORS,
@@ -72,6 +73,8 @@ def _artifact_files_path(project_name, name, version):
 @public
 class Predictor(DeployableComponent):
     """Metadata object representing a predictor in Model Serving."""
+
+    _candidate: DeploymentCandidate | None = None
 
     @staticmethod
     def _get_raw_num_instances(resources):
@@ -245,6 +248,15 @@ class Predictor(DeployableComponent):
     def _set_state(self, state: PredictorState):
         """Set the state of the predictor."""
         self._state = state
+
+    def _set_candidate(self, candidate: DeploymentCandidate | None):
+        """Set the candidate reported by the backend; it is never sent back."""
+        self._candidate = candidate
+
+    @staticmethod
+    def _extract_candidate(json_decamelized):
+        candidate = json_decamelized.pop("candidate", None)
+        return DeploymentCandidate.from_response_json(candidate) if candidate else None
 
     @classmethod
     def _validate_serving_tool(cls, serving_tool):
@@ -479,8 +491,10 @@ class Predictor(DeployableComponent):
 
     @classmethod
     def from_json(cls, json_decamelized):
+        candidate = cls._extract_candidate(json_decamelized)
         predictor = Predictor(**cls.extract_fields_from_json(json_decamelized))
         predictor._set_state(PredictorState.from_response_json(json_decamelized))
+        predictor._set_candidate(candidate)
         return predictor
 
     @classmethod
@@ -583,8 +597,10 @@ class Predictor(DeployableComponent):
 
     def update_from_response_json(self, json_dict):
         json_decamelized = humps.decamelize(json_dict)
+        candidate = self._extract_candidate(json_decamelized)
         self.__init__(**self.extract_fields_from_json(json_decamelized))
         self._set_state(PredictorState.from_response_json(json_decamelized))
+        self._set_candidate(candidate)
         return self
 
     def json(self):

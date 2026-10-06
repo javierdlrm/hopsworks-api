@@ -20,7 +20,7 @@ import threading
 import time
 
 import pytest
-from hopsworks_common.client.exceptions import ModelServingException
+from hopsworks_common.client.exceptions import ModelServingException, RestAPIError
 from hsml.constants import PREDICTOR_STATE
 from hsml.engine import serving_engine
 
@@ -1191,3 +1191,229 @@ class TestDownloadArtifactFiles:
         assert (
             eng._download_files_from_hopsfs.call_args.kwargs["to_local_path"] == target
         )
+
+
+class TestCandidates:
+    def _engine(self, mocker, status=PREDICTOR_STATE.STATUS_RUNNING):
+        eng = serving_engine.ServingEngine.__new__(serving_engine.ServingEngine)
+        eng._engine = mocker.Mock()
+        eng._serving_api = mocker.Mock()
+        eng._upload_local_serving_files = mocker.Mock()
+        eng._upload_default_predictor_stub = mocker.Mock()
+        eng._publish_schema = mocker.Mock()
+        eng._poll_deployment_status = mocker.Mock(return_value=None)
+        deployment = mocker.Mock()
+        deployment.id = 5
+        deployment._predictor.knative_mode = False
+        deployment.CANDIDATE_NOT_READY_ERROR_CODE = 240059
+        deployment.get_state.return_value = mocker.Mock(status=status)
+        return eng, deployment
+
+    @staticmethod
+    def _rest_error(mocker, error_code):
+        response = mocker.MagicMock()
+        response.status_code = 409
+        response.json.return_value = {"errorCode": error_code}
+        return RestAPIError("", response)
+
+    @pytest.fixture(autouse=True)
+    def _no_sleep(self, mocker):
+        mocker.patch("hsml.engine.serving_engine.time.sleep")
+
+    # create
+
+    @pytest.mark.parametrize("knative_mode", [True, None])
+    def test_create_refuses_a_deployment_that_is_not_in_standard_mode(
+        self, mocker, knative_mode
+    ):
+        eng, deployment = self._engine(mocker)
+        deployment._predictor.knative_mode = knative_mode
+
+        with pytest.raises(ModelServingException, match="Standard mode"):
+            eng._create_candidate(deployment, 0)
+
+        eng._upload_local_serving_files.assert_not_called()
+        eng._serving_api._create_candidate.assert_not_called()
+
+    def test_create_refuses_an_unsaved_deployment(self, mocker):
+        eng, deployment = self._engine(mocker)
+        deployment.id = None
+
+        with pytest.raises(ModelServingException, match="not created yet"):
+            eng._create_candidate(deployment, 0)
+
+    @pytest.mark.parametrize(
+        "status",
+        [
+            PREDICTOR_STATE.STATUS_STOPPED,
+            PREDICTOR_STATE.STATUS_STARTING,
+            PREDICTOR_STATE.STATUS_UPDATING,
+            PREDICTOR_STATE.STATUS_FAILED,
+        ],
+    )
+    def test_create_requires_a_running_deployment(self, mocker, status):
+        eng, deployment = self._engine(mocker, status)
+
+        with pytest.raises(ModelServingException, match="must be running"):
+            eng._create_candidate(deployment, 0)
+
+        eng._serving_api._create_candidate.assert_not_called()
+
+    def test_create_uploads_then_posts_then_polls_the_candidate(self, mocker):
+        eng, deployment = self._engine(mocker)
+        order = mocker.Mock()
+        order.attach_mock(eng._upload_local_serving_files, "upload")
+        order.attach_mock(eng._upload_default_predictor_stub, "stub")
+        order.attach_mock(eng._publish_schema, "schema")
+        order.attach_mock(eng._serving_api._create_candidate, "post")
+        eng._serving_api._get_candidate.side_effect = [
+            mocker.Mock(status=PREDICTOR_STATE.STATUS_STARTING),
+            mocker.Mock(status=PREDICTOR_STATE.STATUS_RUNNING),
+        ]
+
+        eng._create_candidate(deployment, 60)
+
+        assert [c[0] for c in order.mock_calls] == ["upload", "stub", "schema", "post"]
+        eng._serving_api._create_candidate.assert_called_once_with(deployment)
+        assert eng._serving_api._get_candidate.call_count == 2
+        deployment._predictor._set_candidate.assert_called()
+
+    def test_create_does_not_poll_without_a_wait(self, mocker):
+        eng, deployment = self._engine(mocker)
+
+        eng._create_candidate(deployment, None)
+
+        eng._serving_api._create_candidate.assert_called_once_with(deployment)
+        eng._serving_api._get_candidate.assert_not_called()
+
+    # polling
+
+    def test_poll_raises_with_the_reason_when_the_candidate_fails(self, mocker):
+        eng, deployment = self._engine(mocker)
+        eng._serving_api._get_candidate.return_value = mocker.Mock(
+            status=PREDICTOR_STATE.STATUS_FAILED,
+            condition=mocker.Mock(reason="Image pull failed"),
+        )
+
+        with pytest.raises(ModelServingException, match="Image pull failed"):
+            eng._poll_candidate_status(deployment, PREDICTOR_STATE.STATUS_RUNNING, 60)
+
+    def test_poll_raises_on_timeout(self, mocker):
+        eng, deployment = self._engine(mocker)
+        eng._serving_api._get_candidate.return_value = mocker.Mock(
+            status=PREDICTOR_STATE.STATUS_STARTING
+        )
+
+        with pytest.raises(ModelServingException, match="await_running"):
+            eng._poll_candidate_status(deployment, PREDICTOR_STATE.STATUS_RUNNING, 10)
+
+        assert eng._serving_api._get_candidate.call_count == 2
+
+    def test_poll_raises_when_the_candidate_disappears(self, mocker):
+        eng, deployment = self._engine(mocker)
+        eng._serving_api._get_candidate.return_value = None
+
+        with pytest.raises(ModelServingException, match="no longer exists"):
+            eng._poll_candidate_status(deployment, PREDICTOR_STATE.STATUS_RUNNING, 10)
+
+    # traffic
+
+    @pytest.mark.parametrize("value", [0, 1, 99])
+    def test_traffic_in_range_is_sent(self, mocker, value):
+        eng, deployment = self._engine(mocker)
+
+        eng._update_candidate_traffic(deployment, value)
+
+        eng._serving_api._update_candidate_traffic.assert_called_once_with(
+            deployment, value
+        )
+
+    @pytest.mark.parametrize("value", [-1, 100, 10.5, "10", None, True])
+    def test_traffic_out_of_range_is_refused(self, mocker, value):
+        eng, deployment = self._engine(mocker)
+
+        with pytest.raises(ValueError, match="between 0 and 99"):
+            eng._update_candidate_traffic(deployment, value)
+
+        eng._serving_api._update_candidate_traffic.assert_not_called()
+
+    # delete
+
+    def test_delete_sends_the_request_while_running_or_updating(self, mocker):
+        for status in (PREDICTOR_STATE.STATUS_RUNNING, PREDICTOR_STATE.STATUS_UPDATING):
+            eng, deployment = self._engine(mocker, status)
+
+            eng._delete_candidate(deployment)
+
+            eng._serving_api._delete_candidate.assert_called_once_with(deployment)
+
+    def test_delete_refuses_a_stopped_deployment(self, mocker):
+        eng, deployment = self._engine(mocker, PREDICTOR_STATE.STATUS_STOPPED)
+
+        with pytest.raises(ModelServingException):
+            eng._delete_candidate(deployment)
+
+    # rollout
+
+    def test_rollout_runs_step_one_polls_then_step_two(self, mocker):
+        eng, deployment = self._engine(mocker)
+        order = mocker.Mock()
+        order.attach_mock(eng._serving_api._rollout_candidate, "rollout")
+        order.attach_mock(eng._poll_deployment_status, "poll")
+
+        eng._rollout_candidate(deployment, 60)
+
+        assert [c[0] for c in order.mock_calls] == ["rollout", "poll", "rollout"]
+        eng._poll_deployment_status.assert_called_once_with(
+            deployment, PREDICTOR_STATE.STATUS_RUNNING, 60
+        )
+
+    def test_rollout_retries_step_two_while_the_primary_is_not_ready(self, mocker):
+        eng, deployment = self._engine(mocker)
+        not_ready = self._rest_error(mocker, 240059)
+        eng._serving_api._rollout_candidate.side_effect = [
+            None,
+            not_ready,
+            not_ready,
+            None,
+        ]
+
+        eng._rollout_candidate(deployment, 60)
+
+        assert eng._serving_api._rollout_candidate.call_count == 4
+
+    def test_rollout_gives_up_when_the_budget_is_spent(self, mocker):
+        eng, deployment = self._engine(mocker)
+        mocker.patch(
+            "hsml.engine.serving_engine.time.monotonic",
+            side_effect=[0, 0, 4, 8, 12],
+        )
+        eng._serving_api._rollout_candidate.side_effect = [
+            None,
+            self._rest_error(mocker, 240059),
+            self._rest_error(mocker, 240059),
+            self._rest_error(mocker, 240059),
+        ]
+
+        with pytest.raises(ModelServingException, match="call `.rollout_candidate"):
+            eng._rollout_candidate(deployment, 10)
+
+    def test_rollout_does_not_retry_other_errors(self, mocker):
+        eng, deployment = self._engine(mocker)
+        eng._serving_api._rollout_candidate.side_effect = [
+            None,
+            self._rest_error(mocker, 240057),
+        ]
+
+        with pytest.raises(RestAPIError):
+            eng._rollout_candidate(deployment, 60)
+
+        assert eng._serving_api._rollout_candidate.call_count == 2
+
+    def test_rollout_refuses_a_stopped_deployment(self, mocker):
+        eng, deployment = self._engine(mocker, PREDICTOR_STATE.STATUS_STOPPED)
+
+        with pytest.raises(ModelServingException):
+            eng._rollout_candidate(deployment, 60)
+
+        eng._serving_api._rollout_candidate.assert_not_called()

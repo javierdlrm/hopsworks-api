@@ -1,0 +1,41 @@
+{
+  "get_candidate_running_test": {
+    "response": {
+      "version": 3,
+      "trafficPercent": 20,
+      "state": "RUNNING_TEST",
+      "status": "Running",
+      "condition": {
+        "type": "READY",
+        "status": true,
+        "reason": "Candidate is ready"
+      },
+      "availableInstances": 2,
+      "requestedInstances": 2,
+      "availableTransformerInstances": 1,
+      "requestedTransformerInstances": 1,
+      "revision": 7
+    }
+  },
+  "get_candidate_failed": {
+    "response": {
+      "version": 3,
+      "trafficPercent": 0,
+      "state": "RUNNING_TEST",
+      "status": "Failed",
+      "condition": {
+        "type": "INITIALIZED",
+        "status": false,
+        "reason": "Image pull failed"
+      },
+      "availableInstances": 0,
+      "requestedInstances": 1,
+      "revision": 7
+    }
+  },
+  "get_candidate_minimal": {
+    "response": {
+      "version": 4
+    }
+  }
+}

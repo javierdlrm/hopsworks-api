@@ -27,6 +27,7 @@ from hsml import (
     decorators,
     deployable_component_logs,
     deployment,
+    deployment_candidate,
     deployment_version,
     inference_endpoint,
     predictor_state,
@@ -453,6 +454,131 @@ class ServingApi:
         deployment_instance.project_name = _client._project_name
         return deployment_instance
 
+    @staticmethod
+    def _is_candidate_endpoint_missing(e: RestAPIError) -> bool:
+        """Whether a 404 means the backend predates candidates.
+
+        A deleted deployment and a deployment without a candidate are 404s too, but they carry their own codes.
+        """
+        return e.response.status_code == 404 and getattr(e, "error_code", None) not in (
+            deployment.Deployment.NOT_FOUND_ERROR_CODE,
+            deployment.Deployment.CANDIDATE_NOT_FOUND_ERROR_CODE,
+        )
+
+    def _send_candidate_request(
+        self,
+        deployment_instance: deployment.Deployment,
+        method: str,
+        suffix: list[str],
+        data: str | None = None,
+    ) -> dict[str, Any]:
+        """Send a request to the candidate endpoints of a deployment and return the response.
+
+        Raises:
+            ModelServingException: If the backend predates candidates.
+        """
+        _client = client._get_instance()
+        path_params = [
+            "project",
+            _client._project_id,
+            "serving",
+            deployment_instance.id,
+            "candidate",
+            *suffix,
+        ]
+        kwargs = {}
+        if data is not None:
+            kwargs = {"headers": {"content-type": "application/json"}, "data": data}
+        try:
+            return _client._send_request(method, path_params, **kwargs)
+        except RestAPIError as e:
+            if self._is_candidate_endpoint_missing(e):
+                raise ModelServingException(
+                    "A/B candidates require a newer Hopsworks release."
+                ) from e
+            raise
+
+    def _apply_candidate_response(
+        self, deployment_instance: deployment.Deployment, response: dict[str, Any]
+    ) -> deployment.Deployment:
+        deployment_instance = deployment_instance.update_from_response_json(response)
+        _client = client._get_instance()
+        deployment_instance.model_registry_id = _client._project_id
+        deployment_instance.project_name = _client._project_name
+        return deployment_instance
+
+    def _create_candidate(
+        self, deployment_instance: deployment.Deployment
+    ) -> deployment.Deployment:
+        """Create a candidate from the configuration of the deployment object.
+
+        Parameters:
+            deployment_instance: Metadata object of the deployment, holding the candidate configuration.
+
+        Returns:
+            The deployment metadata object, updated from the response.
+        """
+        return self._apply_candidate_response(
+            deployment_instance,
+            self._send_candidate_request(
+                deployment_instance, "POST", [], deployment_instance.json()
+            ),
+        )
+
+    def _update_candidate_traffic(
+        self, deployment_instance: deployment.Deployment, traffic_percentage: int
+    ) -> deployment.Deployment:
+        """Set the share of traffic the candidate receives.
+
+        Parameters:
+            deployment_instance: Metadata object of the deployment.
+            traffic_percentage: Share of traffic, in percent.
+
+        Returns:
+            The deployment metadata object, updated from the response.
+        """
+        return self._apply_candidate_response(
+            deployment_instance,
+            self._send_candidate_request(
+                deployment_instance,
+                "PATCH",
+                [],
+                json.dumps({"trafficPercent": traffic_percentage}),
+            ),
+        )
+
+    def _delete_candidate(
+        self, deployment_instance: deployment.Deployment
+    ) -> deployment.Deployment:
+        """Discard the candidate of the deployment.
+
+        Parameters:
+            deployment_instance: Metadata object of the deployment.
+
+        Returns:
+            The deployment metadata object, updated from the response.
+        """
+        return self._apply_candidate_response(
+            deployment_instance,
+            self._send_candidate_request(deployment_instance, "DELETE", []),
+        )
+
+    def _rollout_candidate(
+        self, deployment_instance: deployment.Deployment
+    ) -> deployment.Deployment:
+        """Perform the next step of rolling the candidate out as the live configuration.
+
+        Parameters:
+            deployment_instance: Metadata object of the deployment.
+
+        Returns:
+            The deployment metadata object, updated from the response.
+        """
+        return self._apply_candidate_response(
+            deployment_instance,
+            self._send_candidate_request(deployment_instance, "POST", ["rollout"]),
+        )
+
     def _post(self, deployment_instance: deployment.Deployment, action: str):
         """Perform an action on the deployment.
 
@@ -505,6 +631,29 @@ class ServingApi:
         ]
         deployment_json = _client._send_request("GET", path_params)
         return predictor_state.PredictorState.from_response_json(deployment_json)
+
+    def _get_candidate(
+        self, deployment_instance: deployment.Deployment
+    ) -> deployment_candidate.DeploymentCandidate | None:
+        """Get the current candidate of a given deployment.
+
+        Parameters:
+            deployment_instance: Metadata object of the deployment.
+
+        Returns:
+            The candidate, or None if the deployment has none.
+        """
+        _client = client._get_instance()
+        path_params = [
+            "project",
+            _client._project_id,
+            "serving",
+            str(deployment_instance.id),
+        ]
+        candidate = _client._send_request("GET", path_params).get("candidate")
+        if not candidate:
+            return None
+        return deployment_candidate.DeploymentCandidate.from_response_json(candidate)
 
     def _reset_changes(
         self, deployment_instance: deployment.Deployment
