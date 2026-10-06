@@ -1127,3 +1127,67 @@ class TestSchemaIsRetryable:
         assert p.schema is None
         assert p.schema is None
         assert read.call_count == 1
+
+
+class TestDownloadArtifactFiles:
+    def _engine(self, mocker):
+        eng = serving_engine.ServingEngine.__new__(serving_engine.ServingEngine)
+        eng._dataset_api = mocker.Mock()
+        eng._download_files_from_hopsfs = mocker.Mock()
+        return eng
+
+    def _deployment(self, mocker):
+        d = mocker.Mock()
+        d.id = 5
+        d.name = "dep"
+        d.version = 4
+        d.project_name = "proj"
+        d.has_model = True
+        d.artifact_files_path = "/Projects/proj/Deployments/dep/4"
+        return d
+
+    def test_default_downloads_the_active_version(self, mocker, tmp_path):
+        eng = self._engine(mocker)
+        eng._dataset_api.path_exists.return_value = True
+
+        local_path = eng._download_artifact_files(
+            self._deployment(mocker), local_path=str(tmp_path / "out")
+        )
+
+        kwargs = eng._download_files_from_hopsfs.call_args.kwargs
+        assert kwargs["from_hdfs_path"] == "/Projects/proj/Deployments/dep/4"
+        assert local_path == str(tmp_path / "out")
+
+    def test_default_local_path_uses_the_active_version(self, mocker, tmp_path):
+        eng = self._engine(mocker)
+        eng._dataset_api.path_exists.return_value = True
+        mocker.patch("tempfile.gettempdir", return_value=str(tmp_path))
+
+        local_path = eng._download_artifact_files(self._deployment(mocker))
+
+        assert local_path.endswith(os.path.join("dep", "4"))
+
+    def test_version_downloads_that_versions_files(self, mocker, tmp_path):
+        eng = self._engine(mocker)
+        mocker.patch("tempfile.gettempdir", return_value=str(tmp_path))
+
+        local_path = eng._download_artifact_files(self._deployment(mocker), version=2)
+
+        kwargs = eng._download_files_from_hopsfs.call_args.kwargs
+        assert kwargs["from_hdfs_path"] == "/Projects/proj/Deployments/dep/2"
+        assert kwargs["to_local_path"] == local_path
+        assert local_path.endswith(os.path.join("dep", "2"))
+        eng._dataset_api.path_exists.assert_not_called()
+
+    def test_version_honours_local_path(self, mocker, tmp_path):
+        eng = self._engine(mocker)
+        target = str(tmp_path / "out")
+
+        local_path = eng._download_artifact_files(
+            self._deployment(mocker), local_path=target, version=2
+        )
+
+        assert local_path == target
+        assert (
+            eng._download_files_from_hopsfs.call_args.kwargs["to_local_path"] == target
+        )

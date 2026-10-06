@@ -38,6 +38,7 @@ from hopsworks_common.constants import INFERENCE_ENDPOINTS as IE
 from hopsworks_common.core import dataset_api, inode
 from hsml import default_predictor, deployable_component_logs
 from hsml import deployment_schema as deployment_schema
+from hsml import predictor as predictor_mod
 from hsml.core import serving_api
 from hsml.engine import local_engine
 from hsml.utils.local_paths import _ensure_dataset_dir, _resolve_serving_file
@@ -443,7 +444,9 @@ class ServingEngine:
         )
         update_download_progress(n_dirs=n_dirs, n_files=n_files, done=True)
 
-    def _download_artifact_files(self, deployment_instance, local_path=None):
+    def _download_artifact_files(
+        self, deployment_instance, local_path=None, version=None
+    ):
         if deployment_instance.id is None:
             raise ModelServingException(
                 "Deployment is not created yet. To create the deployment use `.save()`"
@@ -454,7 +457,7 @@ class ServingEngine:
                 tempfile.gettempdir(),
                 str(uuid.uuid4()),
                 deployment_instance.name,
-                str(deployment_instance.version),
+                str(deployment_instance.version if version is None else version),
             )
         os.makedirs(local_path, exist_ok=True)
 
@@ -467,7 +470,12 @@ class ServingEngine:
             )
 
         try:
-            from_hdfs_path = deployment_instance.artifact_files_path
+            if version is None:
+                from_hdfs_path = deployment_instance.artifact_files_path
+            else:
+                from_hdfs_path = predictor_mod._artifact_files_path(
+                    deployment_instance.project_name, deployment_instance.name, version
+                )
             if from_hdfs_path.startswith("hdfs:/"):
                 projects_index = from_hdfs_path.find("/Projects", 0)
                 from_hdfs_path = from_hdfs_path[projects_index:]
@@ -475,8 +483,10 @@ class ServingEngine:
             # backward compatibility: running deployments during upgrade contain artifact files under /Models/name/version/Artifacts folder
             # if the deployment scales out, this method is used by storage-initializer to pull the files. Therefore, we need to pull files
             # from the legacy path if the deployment has not yet been migrated
-            if deployment_instance.has_model and not self._dataset_api.path_exists(
-                from_hdfs_path
+            if (
+                version is None
+                and deployment_instance.has_model
+                and not self._dataset_api.path_exists(from_hdfs_path)
             ):
                 # legacy artifact version path under Models dataset
                 legacy_from_hdfs_path = "{}/{}/{}/{}/{}/{}/{}".format(

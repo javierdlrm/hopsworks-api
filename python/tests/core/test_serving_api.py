@@ -574,6 +574,41 @@ class TestVersioning:
         with pytest.raises(ModelServingException, match="newer Hopsworks"):
             api._get_versions(_versionable_deployment(mocker))
 
+    def test_get_version_asks_for_one_version(self, mocker, backend_fixtures):
+        api = ServingApi()
+        response = backend_fixtures["deployment_version"]["get_version"]["response"]
+        hopsworks_client = _patch_client(mocker, response)
+
+        version = api._get_version(_versionable_deployment(mocker), 3)
+
+        args, _ = hopsworks_client._send_request.call_args
+        assert args[0] == "GET"
+        assert args[1] == ["project", 1, "serving", 5, "versions", 3]
+        assert version.version == 3
+
+    def test_get_version_of_an_unsaved_deployment_is_refused(self, mocker):
+        api = ServingApi()
+        hopsworks_client = _patch_client(mocker, {})
+
+        with pytest.raises(ModelServingException, match="not been saved"):
+            api._get_version(_versionable_deployment(mocker, deployment_id=None), 3)
+        hopsworks_client._send_request.assert_not_called()
+
+    def test_get_version_on_an_old_backend_raises_a_clear_error(self, mocker):
+        api = ServingApi()
+        _patch_client(mocker, self._error(mocker, 404))
+
+        with pytest.raises(ModelServingException, match="newer Hopsworks"):
+            api._get_version(_versionable_deployment(mocker), 3)
+
+    @pytest.mark.parametrize("error_code", [240000, 240052])
+    def test_get_version_backend_errors_propagate(self, mocker, error_code):
+        api = ServingApi()
+        _patch_client(mocker, self._error(mocker, 404, {"errorCode": error_code}))
+
+        with pytest.raises(RestAPIError):
+            api._get_version(_versionable_deployment(mocker), 3)
+
     def test_rollback_posts_the_version_and_applies_the_response(self, mocker):
         api = ServingApi()
         response = {"id": 5, "version": 2}

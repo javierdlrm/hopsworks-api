@@ -63,6 +63,7 @@ def _warn_opensearch_source_deprecated() -> None:
 @public
 class Deployment:
     NOT_FOUND_ERROR_CODE = 240000
+    VERSION_NOT_FOUND_ERROR_CODE = 240052
     """Metadata object representing a deployment in Model Serving."""
 
     def __init__(
@@ -158,6 +159,23 @@ class Deployment:
             hopsworks.client.exceptions.ModelServingException: If the deployment has not been saved yet or the backend does not support deployment versions.
         """
         return self._serving_api._get_versions(self)
+
+    @public
+    @usage._method_logger
+    def get_version(self, version: int) -> DeploymentVersion:
+        """Get one configuration version of this deployment.
+
+        Parameters:
+            version: The number of the version to get.
+
+        Returns:
+            The [`DeploymentVersion`][hsml.deployment_version.DeploymentVersion] with that number.
+
+        Raises:
+            hopsworks.client.exceptions.RestAPIError: In case the backend encounters an issue, including a version the deployment does not have.
+            hopsworks.client.exceptions.ModelServingException: If the deployment has not been saved yet or the backend does not support deployment versions.
+        """
+        return self._serving_api._get_version(self, version)
 
     @public
     @usage._method_logger
@@ -777,17 +795,26 @@ class Deployment:
 
     @public
     @usage._method_logger
-    def download_artifact_files(self, local_path: str | None = None):
+    def download_artifact_files(
+        self,
+        local_path: str | None = None,
+        version: int | DeploymentVersion | None = None,
+    ):
         """Download the artifact files served by the deployment.
+
+        By default, the files of the active version are downloaded.
 
         Parameters:
             local_path: Path where to download the artifact files in the local filesystem.
+            version: The version whose files to download, as its number or as a [`DeploymentVersion`][hsml.deployment_version.DeploymentVersion].
 
         Raises:
             hopsworks.client.exceptions.RestAPIError: In case the backend encounters an issue.
         """
+        if version is not None and not isinstance(version, int):
+            version = version.version
         return self._serving_engine._download_artifact_files(
-            self, local_path=local_path
+            self, local_path=local_path, version=version
         )
 
     @public

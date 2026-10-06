@@ -57,6 +57,18 @@ from hsml.transformer import Transformer
 _logger = logging.getLogger(__name__)
 
 
+def _artifact_files_path(project_name, name, version):
+    """Path of the artifact files of one version of a deployment."""
+    # "/Projects/{project_name}/Deployments/{name}/{version}"
+    return "{}/{}/{}/{}/{}".format(
+        "/Projects",
+        project_name,
+        MODEL_SERVING.DEPLOYMENTS_DATASET,
+        str(name),
+        str(version),
+    )
+
+
 @public
 class Predictor(DeployableComponent):
     """Metadata object representing a predictor in Model Serving."""
@@ -752,14 +764,7 @@ class Predictor(DeployableComponent):
     @property
     def artifact_files_path(self):
         """Path of the artifact files deployed by the predictor."""
-        # "/Projects/{project_name}/Deployments/{name}/{version}"
-        return "{}/{}/{}/{}/{}".format(
-            "/Projects",
-            self._project_name,
-            MODEL_SERVING.DEPLOYMENTS_DATASET,
-            str(self._name),
-            str(self._version),
-        )
+        return _artifact_files_path(self._project_name, self._name, self._version)
 
     @public
     @property

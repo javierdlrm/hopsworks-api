@@ -313,12 +313,11 @@ class ServingApi:
     def _is_versions_endpoint_missing(e: RestAPIError) -> bool:
         """Whether a 404 means the backend predates deployment versions.
 
-        A deleted deployment is a 404 too, but it carries the deployment-not-found code.
+        A deleted deployment and a version the deployment does not have are 404s too, but they carry their own codes.
         """
-        return (
-            e.response.status_code == 404
-            and getattr(e, "error_code", None)
-            != deployment.Deployment.NOT_FOUND_ERROR_CODE
+        return e.response.status_code == 404 and getattr(e, "error_code", None) not in (
+            deployment.Deployment.NOT_FOUND_ERROR_CODE,
+            deployment.Deployment.VERSION_NOT_FOUND_ERROR_CODE,
         )
 
     def _supports_versions(self, deployment_instance: deployment.Deployment) -> bool:
@@ -382,6 +381,44 @@ class ServingApi:
             count = response.get("count")
             if not page or count is None or offset >= count:
                 return sorted(versions.values(), key=lambda v: v.version, reverse=True)
+
+    def _get_version(
+        self, deployment_instance: deployment.Deployment, version: int
+    ) -> deployment_version.DeploymentVersion:
+        """Get one retained configuration version of a deployment.
+
+        Parameters:
+            deployment_instance: Metadata object of the deployment.
+            version: The version to get.
+
+        Returns:
+            The requested version.
+
+        Raises:
+            ModelServingException: If the deployment is not saved yet or the backend predates deployment versions.
+        """
+        if deployment_instance.id is None:
+            raise ModelServingException(
+                "The deployment has not been saved yet, so it has no versions."
+            )
+        _client = client._get_instance()
+        path_params = [
+            "project",
+            _client._project_id,
+            "serving",
+            deployment_instance.id,
+            "versions",
+            version,
+        ]
+        try:
+            response = _client._send_request("GET", path_params)
+        except RestAPIError as e:
+            if self._is_versions_endpoint_missing(e):
+                raise ModelServingException(
+                    "Deployment versioning requires a newer Hopsworks release."
+                ) from e
+            raise
+        return deployment_version.DeploymentVersion.from_response_json(response)
 
     def _rollback(
         self, deployment_instance: deployment.Deployment, version: int

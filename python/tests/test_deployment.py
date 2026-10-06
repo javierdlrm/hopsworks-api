@@ -450,6 +450,21 @@ class TestDeployment:
         assert versions == []
         mock_get_versions.assert_called_once_with(d)
 
+    def test_get_version(self, mocker, backend_fixtures):
+        # Arrange
+        p = self._get_dummy_predictor(mocker, backend_fixtures)
+        d = deployment.Deployment(predictor=p)
+        mock_get_version = mocker.patch(
+            "hsml.core.serving_api.ServingApi._get_version", return_value="v"
+        )
+
+        # Act
+        version = d.get_version(3)
+
+        # Assert
+        assert version == "v"
+        mock_get_version.assert_called_once_with(d, 3)
+
     def test_rollback(self, mocker, backend_fixtures):
         # Arrange
         p = self._get_dummy_predictor(mocker, backend_fixtures)
@@ -988,8 +1003,30 @@ class TestDeployment:
 
         # Assert
         mock_serving_engine_download_artifact_files.assert_called_once_with(
-            d, local_path=None
+            d, local_path=None, version=None
         )
+
+    def test_download_artifact_of_a_version_number(self, mocker, backend_fixtures):
+        p = self._get_dummy_predictor(mocker, backend_fixtures)
+        d = deployment.Deployment(predictor=p)
+        mock_download = mocker.patch(
+            "hsml.engine.serving_engine.ServingEngine._download_artifact_files"
+        )
+
+        d.download_artifact_files(local_path="/tmp/x", version=2)
+
+        mock_download.assert_called_once_with(d, local_path="/tmp/x", version=2)
+
+    def test_download_artifact_of_a_deployment_version(self, mocker, backend_fixtures):
+        p = self._get_dummy_predictor(mocker, backend_fixtures)
+        d = deployment.Deployment(predictor=p)
+        mock_download = mocker.patch(
+            "hsml.engine.serving_engine.ServingEngine._download_artifact_files"
+        )
+
+        d.download_artifact_files(version=mocker.Mock(version=2))
+
+        mock_download.assert_called_once_with(d, local_path=None, version=2)
 
     # get logs
 

@@ -151,7 +151,9 @@ deployment.delete()
 deployment.save()                                      # edit the active version in place
 deployment.save(new_version=True)                      # store the edit as a new version and activate it
 deployment.get_versions()                              # every version, newest first, `.active` on the live one
+deployment.get_version(2)                              # one version
 deployment.rollback(1)                                 # reactivate version 1; running pods restart
+deployment.download_artifact_files(version=2)          # files of version 2 (default: the active version)
 ```
 
 A version holds the predictor, transformer and model artifact settings.
