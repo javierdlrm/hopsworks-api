@@ -2540,6 +2540,23 @@ class TestFeatureViewAppliedCodeVersions:
         for name, identity in applied.items():
             assert identity.startswith(f"{name}@v")
 
+    def test_applied_code_versions_keep_every_attachment_of_one_function(
+        self, mocker, backend_fixtures
+    ):
+        mocker.patch("hopsworks_common.client._get_instance")
+        json = backend_fixtures["feature_view"]["get"]["response"]
+        fv = feature_view.FeatureView.from_response_json(json)
+        tf_a = TestFeatureViewReplay()._scaler()("amount")
+        tf_b = TestFeatureViewReplay()._scaler()("amount_24h")
+        fv._transformation_functions = [tf_a, tf_b]
+
+        applied = fv.applied_code_versions()
+
+        assert applied == {
+            "scale(amount)": tf_a.code_version,
+            "scale(amount_24h)": tf_b.code_version,
+        }
+
 
 class TestFeatureViewReplay:
     def _view_with(self, mocker, backend_fixtures, tf):
@@ -2629,8 +2646,12 @@ class TestFeatureViewReplay:
         )
         executor = mocker.Mock()
         executor.execute.return_value = pd.DataFrame({"scale_amount_": [1.0]})
-        mocker.patch.object(other, "executor", return_value=executor)
-        attached_executor = mocker.patch.object(tf, "executor")
+        # the other version is bound to the attached inputs on a copy, so patch the class
+        mocker.patch(
+            "hsfs.transformation_function.TransformationFunction.executor",
+            autospec=True,
+            return_value=executor,
+        )
 
         fv.replay(
             "scale",
@@ -2640,8 +2661,76 @@ class TestFeatureViewReplay:
         )
 
         fetch.assert_called_once_with("scale", version=2)
-        attached_executor.assert_not_called()
         executor.execute.assert_called_once()
+
+    def test_replay_of_another_version_binds_the_attached_columns(
+        self, mocker, backend_fixtures
+    ):
+        tf = self._scaler(version=1)("amount_24h")
+        # the registry-fetched function knows only its own argument name
+        other = self._scaler(version=2)
+        fv = self._view_with(mocker, backend_fixtures, tf)
+        mocker.patch.object(
+            fv._transformation_function_engine,
+            "_get_transformation_fn",
+            return_value=other,
+        )
+        mocker.patch.object(
+            fv,
+            "get_training_dataset_statistics",
+            return_value=mocker.Mock(feature_descriptive_statistics=[]),
+        )
+        seen = {}
+
+        def executor(tf_self, statistics=None, context=None):
+            seen["inputs"] = tf_self.hopsworks_udf.transformation_features
+            seen["version"] = tf_self.version
+            return mocker.Mock(
+                execute=lambda *columns: (
+                    seen.update(columns=columns) or pd.Series([1.0])
+                )
+            )
+
+        mocker.patch(
+            "hsfs.transformation_function.TransformationFunction.executor",
+            autospec=True,
+            side_effect=executor,
+        )
+        data = pd.DataFrame({"amount_24h": [10.0], "amount": [99.0]})
+
+        fv.replay("scale", data, training_dataset_version=1, version=2)
+
+        assert seen["version"] == 2
+        assert seen["inputs"] == ["amount_24h"]
+        assert seen["columns"][0].tolist() == [10.0]
+
+    def test_replay_picks_among_several_attachments_of_one_function(
+        self, mocker, backend_fixtures
+    ):
+        tf_a = self._scaler()("amount")
+        tf_b = self._scaler()("amount_24h")
+        fv = self._view_with(mocker, backend_fixtures, tf_a)
+        fv._transformation_functions = [tf_a, tf_b]
+        mocker.patch.object(
+            fv,
+            "get_training_dataset_statistics",
+            return_value=mocker.Mock(feature_descriptive_statistics=[]),
+        )
+        executors = {}
+        for label, tf in (("a", tf_a), ("b", tf_b)):
+            executors[label] = mocker.Mock()
+            executors[label].execute.return_value = pd.Series([1.0])
+            mocker.patch.object(tf, "executor", return_value=executors[label])
+        data = pd.DataFrame({"amount": [1.0], "amount_24h": [2.0]})
+
+        with pytest.raises(ValueError, match="several inputs"):
+            fv.replay("scale", data, training_dataset_version=1)
+
+        fv.replay(tf_a, data, training_dataset_version=1)
+        fv.replay(tf_b, data, training_dataset_version=1)
+
+        assert executors["a"].execute.call_args.args[0].tolist() == [1.0]
+        assert executors["b"].execute.call_args.args[0].tolist() == [2.0]
 
     def test_replay_falls_back_to_the_latest_training_dataset(
         self, mocker, backend_fixtures

@@ -691,6 +691,7 @@ class StatisticsEngine:
                 training_dataset_version=None,
             )
 
+    @decorators._catch_not_found("hsfs.statistics.Statistics", fallback_return={})
     def _get_boundary_counts(
         self,
         feature_group,
@@ -709,7 +710,7 @@ class StatisticsEngine:
             exact: Match the bounds exactly instead of as a range.
 
         Returns:
-            The count per `(start, end)` window, for the windows that carry one.
+            The count per `(start, end)` window, for the windows that carry one; empty when no window has been recorded yet.
         """
         if exact:
             rows = self._statistics_api._get(

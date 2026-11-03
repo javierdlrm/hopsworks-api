@@ -1178,6 +1178,66 @@ class TestBoundaryCounts:
 
         assert s_engine._get_boundary_counts(mocker.Mock(), event_time="event_ts") == {}
 
+    def _not_found(self, mocker):
+        response = mocker.Mock()
+        response.json.return_value = {
+            "errorCode": exceptions.RestAPIError.FeatureStoreErrorCode.STATISTICS_NOT_FOUND
+        }
+        response.status_code = 404
+        return exceptions.RestAPIError("url", response)
+
+    def test_get_boundary_counts_of_a_fresh_group_is_empty(self, mocker):
+        s_engine = self._engine(mocker)
+        mocker.patch.object(
+            s_engine._statistics_api, "_get_all", side_effect=self._not_found(mocker)
+        )
+        mocker.patch.object(
+            s_engine._statistics_api, "_get", side_effect=self._not_found(mocker)
+        )
+
+        assert s_engine._get_boundary_counts(mocker.Mock(), event_time="e") == {}
+        assert (
+            s_engine._get_boundary_counts(
+                mocker.Mock(),
+                start_event_time=1,
+                end_event_time=2,
+                event_time="e",
+                exact=True,
+            )
+            == {}
+        )
+
+    def test_get_boundary_counts_still_raises_other_errors(self, mocker):
+        s_engine = self._engine(mocker)
+        response = mocker.Mock()
+        response.json.return_value = {"errorCode": 1}
+        response.status_code = 500
+        mocker.patch.object(
+            s_engine._statistics_api,
+            "_get_all",
+            side_effect=exceptions.RestAPIError("url", response),
+        )
+
+        with pytest.raises(exceptions.RestAPIError):
+            s_engine._get_boundary_counts(mocker.Mock(), event_time="e")
+
+    def test_accumulate_records_the_first_window_of_a_fresh_group(self, mocker):
+        s_engine = self._engine(mocker)
+        post = mocker.patch.object(s_engine._statistics_api, "_post")
+        mocker.patch.object(
+            s_engine._statistics_api, "_get", side_effect=self._not_found(mocker)
+        )
+
+        s_engine._record_boundary_counts(
+            mocker.Mock(),
+            {(1704067200000, 1704070800000): 25},
+            event_time="event_ts",
+            accumulate=True,
+        )
+
+        assert post.call_count == 1
+        assert post.call_args.kwargs["stats"].boundary_count == 25
+
 
 class TestTransformationStatisticsProfile:
     def test_transformation_fn_statistics_keep_the_histogram_and_the_kll_sketch(

@@ -6540,34 +6540,49 @@ class FeatureView:
             ValueError: If the function is not attached to this feature view, or `data` lacks one of its inputs.
             hopsworks.client.exceptions.RestAPIError: If the backend encounters an error when handling the request.
         """
-        attached = {
-            tf.hopsworks_udf.function_name: tf
-            for tf in list(self._transformation_functions or [])
-            + list(self._on_demand_transformation_functions or [])
-        }
-        name = (
-            transformation_function
-            if isinstance(transformation_function, str)
-            else transformation_function.hopsworks_udf.function_name
+        candidates = list(self._transformation_functions or []) + list(
+            self._on_demand_transformation_functions or []
         )
-        if name not in attached:
+        if isinstance(transformation_function, str):
+            name = transformation_function
+            matching = [
+                tf for tf in candidates if tf.hopsworks_udf.function_name == name
+            ]
+        else:
+            name = transformation_function.hopsworks_udf.function_name
+            key = (
+                name,
+                tuple(transformation_function.hopsworks_udf.transformation_features),
+            )
+            matching = [tf for tf in candidates if self._attachment_key(tf) == key]
+        if not matching:
+            attached = sorted({tf.hopsworks_udf.function_name for tf in candidates})
             raise ValueError(
                 f"Transformation function {name!r} is not attached to feature view "
-                f"{self.name} v{self.version}; attached: {sorted(attached)}."
+                f"{self.name} v{self.version}; attached: {attached}."
             )
-        tf = attached[name]
+        if len(matching) > 1:
+            raise ValueError(
+                f"Transformation function {name!r} is attached to feature view "
+                f"{self.name} v{self.version} on several inputs "
+                f"{[list(self._attachment_key(tf)[1]) for tf in matching]}; "
+                "pass the attached transformation function object to pick one."
+            )
+        tf = matching[0]
+        inputs = list(tf.hopsworks_udf.transformation_features)
         if version is not None and version != tf.version:
-            # another registered version of the same function, run as if it were attached
+            # another registered version of the same function, run as if it were attached:
+            # bound to the columns the attached one reads, not to its own argument names
             other = self._transformation_function_engine._get_transformation_fn(
                 name, version=version
             )
+            other = other(*inputs)
             other.transformation_type = tf.transformation_type
             other.hopsworks_udf.feature_name_prefix = (
                 tf.hopsworks_udf.feature_name_prefix
             )
             tf = other
 
-        inputs = list(tf.hopsworks_udf.transformation_features)
         missing = [feature for feature in inputs if feature not in data.columns]
         if missing:
             raise ValueError(
@@ -6609,14 +6624,28 @@ class FeatureView:
         Transformation functions are fixed per feature view version, so the identity of the code applied to a logged row is the identity of the functions attached to the version whose logging group holds the row; the code outside the feature view is the row's `serving_revision`.
 
         Returns:
-            A mapping from function name to `name@v<version>:<code_hash>`, over the model-dependent and the on-demand transformation functions.
+            A mapping to `name@v<version>:<code_hash>`, over the model-dependent and the on-demand transformation functions.
+            The key is the function name.
+            A function attached more than once, to different inputs, appears once per attachment under `name(input, ...)`.
         """
-        applied = {}
-        for tf in list(self._transformation_functions or []) + list(
+        attached = list(self._transformation_functions or []) + list(
             self._on_demand_transformation_functions or []
-        ):
-            applied[tf.hopsworks_udf.function_name] = tf.code_version
+        )
+        names = [self._attachment_key(tf)[0] for tf in attached]
+        applied = {}
+        for tf in attached:
+            name, inputs = self._attachment_key(tf)
+            key = name if names.count(name) == 1 else f"{name}({', '.join(inputs)})"
+            applied[key] = tf.code_version
         return applied
+
+    @staticmethod
+    def _attachment_key(tf: TransformationFunction) -> tuple[str, tuple[str, ...]]:
+        """The identity of one attachment: the function name and the columns it reads."""
+        return (
+            tf.hopsworks_udf.function_name,
+            tuple(tf.hopsworks_udf.transformation_features),
+        )
 
     @transformation_functions.setter
     def transformation_functions(
