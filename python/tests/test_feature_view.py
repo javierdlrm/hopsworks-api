@@ -19,6 +19,7 @@ import json
 import typing
 import warnings
 
+import pandas as pd
 import pytest
 from hopsworks_common import version
 from hopsworks_common.client.exceptions import FeatureStoreException
@@ -2525,6 +2526,7 @@ class TestFeatureViewAppliedCodeVersions:
         self, mocker, backend_fixtures
     ):
         mocker.patch("hopsworks_common.client._get_instance")
+        mocker.patch("hsfs.engine._get_type")
         json = backend_fixtures["feature_view"]["get_transformations"]["response"]
         fv = feature_view.FeatureView.from_response_json(json)
 
@@ -2544,6 +2546,7 @@ class TestFeatureViewAppliedCodeVersions:
         self, mocker, backend_fixtures
     ):
         mocker.patch("hopsworks_common.client._get_instance")
+        mocker.patch("hsfs.engine._get_type")
         json = backend_fixtures["feature_view"]["get"]["response"]
         fv = feature_view.FeatureView.from_response_json(json)
         tf_a = TestFeatureViewReplay()._scaler()("amount")
@@ -2561,6 +2564,7 @@ class TestFeatureViewAppliedCodeVersions:
 class TestFeatureViewReplay:
     def _view_with(self, mocker, backend_fixtures, tf):
         mocker.patch("hopsworks_common.client._get_instance")
+        mocker.patch("hsfs.engine._get_type")
         json = backend_fixtures["feature_view"]["get"]["response"]
         fv = feature_view.FeatureView.from_response_json(json)
         fv._transformation_functions = [tf]
